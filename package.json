@@ -1,9 +1,8 @@
 {
   "name": "pi-jfiles",
-  "private": true,
   "version": "0.1.0",
   "description": "Ask caller-defined questions about whole project files through Pi codemode and TypeSafe Jev.",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "author": "fr0ziii",
   "keywords": ["pi-package", "codemode", "typesafe", "jev", "classification"],
   "homepage": "https://github.com/fr0ziii/pi-jfiles#readme",

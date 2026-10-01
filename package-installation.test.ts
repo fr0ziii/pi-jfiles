@@ -18,7 +18,7 @@ const repositoryRoot = fileURLToPath(new URL("./", import.meta.url));
 const packageManifestSchema = Type.Object({
   name: Type.Literal("pi-jfiles"),
   type: Type.Literal("module"),
-  license: Type.String(),
+  license: Type.Literal("MIT"),
   private: Type.Optional(Type.Boolean()),
   pi: Type.Object({ extensions: Type.Array(Type.String()) }),
 });
@@ -41,8 +41,7 @@ test("npm archive installs in isolated Pi and preserves one tool, local preview,
   const manifest: unknown = JSON.parse(await readFile(join(packageRoot, "package.json"), "utf8"));
   assert.ok(Check(packageManifestSchema, manifest));
   assert.deepEqual(manifest.pi.extensions, ["./index.ts"]);
-  if (manifest.license === "UNLICENSED") assert.equal(manifest.private, true);
-  else assert.notEqual(manifest.private, true);
+  assert.notEqual(manifest.private, true);
   assert.deepEqual(packedPaths.sort(), [
     "package/index.ts",
     "package/file-classification-contract.ts",
@@ -51,7 +50,7 @@ test("npm archive installs in isolated Pi and preserves one tool, local preview,
     "package/package.json",
     "package/README.md",
     "package/docs/jev-file-classification-plan.md",
-    ...(manifest.license === "UNLICENSED" ? [] : ["package/LICENSE"]),
+    "package/LICENSE",
   ].sort());
 
   await writeFile(join(agentDir, "settings.json"), JSON.stringify({

@@ -1,8 +1,5 @@
 # pi-jfiles
 
-Publication is pending a license choice. The package is marked private until
-that choice is confirmed; the install command below is the release target.
-
 Ask task-specific questions about whole project files through Pi codemode.
 The extension returns paths, typed answers, and coverage. It does not return
 source text. Read selected files separately to inspect the evidence.
@@ -284,6 +281,10 @@ npm audit
 npm pack --dry-run --ignore-scripts
 ```
 
+Editing this checkout does not change the installed npm copy. Publish a new
+version before updating the installation. Keep `npm:pi-jfiles` as the configured
+package source; do not also load the checkout as a local extension.
+
 Pi and TypeBox are host peer dependencies, not bundled runtime dependencies.
 Tests use temporary projects, real ripgrep, and the real Pi codemode path.
 A local HTTP fixture exercises Pi's TypeSafe classifier transport with synthetic
@@ -303,3 +304,7 @@ The Pi 0.99.1 peer dependency has a shrinkwrapped `brace-expansion@5.0.9`
 dependency with a high-severity denial-of-service advisory. `npm audit fix`
 does not replace it. This extension rejects brace globs but does not patch Pi.
 Update the upstream Pi dependency when a corrected release is available.
+
+## License
+
+[MIT](LICENSE).

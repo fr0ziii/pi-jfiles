@@ -685,8 +685,8 @@ credentials, runtime state, and dependencies. A release must also contain its
 confirmed license. Pi and TypeBox remain host peers; development tests use the
 pinned Pi 0.99.1 SDK. The known upstream dependency advisory remains unresolved.
 
-Publication awaits a license choice. The draft is private and `UNLICENSED` to
-prevent accidental publication. No npm package or GitHub repository was published
-during preparation. The original dotfiles extension and user configuration stay
-in place until publication and the installation switch. No remote TypeSafe
-submission was made.
+Local preparation ended with a private, `UNLICENSED` draft to prevent accidental
+publication. No npm package or GitHub repository was published at that stage.
+MIT is now confirmed for the release. Public npm installation and removal of
+the original dotfiles copy are separate release validation gates. No remote
+TypeSafe submission was made.
