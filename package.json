@@ -1,0 +1,57 @@
+{
+  "name": "pi-jfiles",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Ask caller-defined questions about whole project files through Pi codemode and TypeSafe Jev.",
+  "license": "UNLICENSED",
+  "author": "fr0ziii",
+  "keywords": ["pi-package", "codemode", "typesafe", "jev", "classification"],
+  "homepage": "https://github.com/fr0ziii/pi-jfiles#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fr0ziii/pi-jfiles.git"
+  },
+  "bugs": {
+    "url": "https://github.com/fr0ziii/pi-jfiles/issues"
+  },
+  "files": [
+    "index.ts",
+    "file-classification-contract.ts",
+    "file-classification.ts",
+    "file-selection.ts",
+    "README.md",
+    "docs/"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24.8.0"
+  },
+  "scripts": {
+    "check": "npm run typecheck && npm test",
+    "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test *.test.ts",
+    "prepublishOnly": "npm run check"
+  },
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": ">=0.99.1",
+    "@earendil-works/pi-coding-agent": ">=0.99.1",
+    "typebox": "^1.3.27"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.99.1",
+    "@earendil-works/pi-coding-agent": "0.99.1",
+    "typebox": "^1.3.27",
+    "@types/node": "^24.5.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}
