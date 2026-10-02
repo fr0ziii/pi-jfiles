@@ -1,4 +1,5 @@
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Effect } from "effect";
 import { fileClassificationInputSchema, fileClassificationOutputSchema } from "./file-classification-contract.ts";
 import { createFileClassifier } from "./file-classification.ts";
 
@@ -18,27 +19,35 @@ export default function registerJevFiles(pi: ExtensionAPI): void {
     parameters: fileClassificationInputSchema,
     outputSchema: fileClassificationOutputSchema,
     async execute(_toolCallId, args, signal, _onUpdate, ctx) {
-      const run = await classifier.run(ctx.cwd, args, {
+      const run = await Effect.runPromise(classifier.run(ctx.cwd, args, {
         allowRemote: pi.getFlag("jev-files-allow-remote") === true,
         async resolveModel() {
           const model = ctx.modelRegistry.getModelOfType("classifier", "typesafe", "jev-latest");
+
           if (!model) return { status: "error", error: { tag: "ModelUnavailable", message: "Run pi update --models to load typesafe/jev-latest." } };
+
           if (!(await ctx.modelRegistry.getApiKeyForProvider("typesafe"))) {
             return { status: "error", error: { tag: "CredentialsRequired", message: "Jev files requires TypeSafe credentials. Use /login or TYPESAFE_API_KEY before classification." } };
           }
+
           return { status: "ok", model };
         },
         classify: (model, context, options) => ctx.modelRegistry.classify(model, context, options),
-      }, signal);
+      }, signal));
+
       const summary = { status: run.result.status, summary: run.result.summary, error: run.result.error };
-      return {
+
+      const toolResult: AgentToolResult<typeof summary> = {
         content: [{ type: "text", text: JSON.stringify(summary) }],
         structuredContent: run.result,
         details: summary,
         // Pi keeps schema-defined error results consumable in codemode.
         isError: run.result.status === "failed",
-        ...(run.usage ? { usage: run.usage } : {}),
       };
+
+      if (run.usage) toolResult.usage = run.usage;
+
+      return toolResult;
     },
   });
 }

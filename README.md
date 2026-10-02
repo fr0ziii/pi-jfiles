@@ -272,6 +272,24 @@ Codemode storage and Pi session records follow Pi's own retention rules.
 
 ## Development
 
+The runtime uses Effect for I/O, concurrency, deadlines, clocks, and cleanup.
+TypeBox still owns the public tool contract. Pi owns model discovery, credentials,
+and transport. The Pi Adapter converts the scan Effect to a Promise.
+The internal runner accepts the schema-derived input union. Its parser still
+checks values before filesystem or provider access. Raw parser input stays
+`unknown`; one line-scoped lint exception documents this trust boundary.
+
+`npm run check` runs Oxlint, TypeScript, and tests. Oxlint checks syntax and
+local code patterns; it does not replace typechecking or resource-safety tests.
+The rules are in `.oxlintrc.json`. Generic anti-slop rules and the optional
+Effect rules are vendored in `tools/oxlint/anti-slop/`. Their source revision,
+licenses, and update instructions are recorded there in `UPSTREAM.md`.
+Keep Oxlint and `@oxlint/plugins` pinned to the same exact version.
+These rules are syntax/local-pattern checks, not type-aware verification.
+Temporal tests use Effect TestClock.
+Local directory installs need dependencies installed first; Pi installs runtime
+dependencies for npm packages.
+
 ```bash
 git clone https://github.com/fr0ziii/pi-jfiles.git
 cd pi-jfiles
@@ -290,12 +308,13 @@ Tests use temporary projects, real ripgrep, and the real Pi codemode path.
 A local HTTP fixture exercises Pi's TypeSafe classifier transport with synthetic
 source and credentials. Tests inspect real codemode declarations, compile valid
 and invalid caller examples, and check runtime validation. Routine checks do
-not call the remote provider. A package test packs the shipped files, installs
-the unpacked package with Pi in a temporary agent directory, and checks preview
-and no-consent refusal through codemode. Live authentication, billing, latency,
+not call the remote provider. A package test packs the shipped files, installs the archive and runtime
+dependencies from the local npm cache, and loads the package with Pi in a temporary
+agent directory. It checks preview and no-consent refusal through codemode. Live authentication, billing, latency,
 and answer quality remain separate opt-in checks.
 
-The npm archive contains the four runtime TypeScript modules and documentation.
+Runtime TypeScript modules are in `src/`. Tests and fixtures are in `tests/`.
+The npm archive contains the four runtime modules and documentation.
 Tests, fixtures, the development lockfile, and configuration stay in the source
 repository. See the [design and review record](docs/jev-file-classification-plan.md)
 for module ownership, verification evidence, and remaining risks.

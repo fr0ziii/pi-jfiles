@@ -1,13 +1,19 @@
 # pi-jfiles
 
-This repository contains one Pi extension. The runtime modules are at the
-repository root. Read `README.md` for installation and use. Read
+This repository contains one Pi extension. Runtime modules are in `src/`.
+Tests and fixtures are in `tests/`. Read `README.md` for installation and use. Read
 `docs/jev-file-classification-plan.md` when changing contracts, selection rules,
 resource ownership, or verification requirements.
 
 ## Changes
 
-- Use plain TypeScript and schema-derived types.
+- Use Effect for runtime I/O, concurrency, deadlines, clocks, and cleanup.
+  Keep Promise conversion at Pi and native API boundaries. Keep pure logic in
+  TypeScript. Use the pinned Effect version and inspect its APIs before changes.
+- Keep TypeBox as the tool contract owner and derive public types from it.
+  Use typed Effect errors for expected failures; keep raw causes private.
+- Keep provider permits until the underlying Promise settles, including after
+  interruption. Use Effect TestClock and explicit readiness signals in tests.
 - Keep `classify_files` as the only registered tool, with codemode exposure.
 - Use Pi for model discovery, credentials, and TypeSafe transport.
 - Preserve the startup-only `--jev-files-allow-remote` permission.

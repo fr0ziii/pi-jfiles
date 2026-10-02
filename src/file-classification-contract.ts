@@ -2,9 +2,13 @@ import { Type, type Static } from "typebox";
 import { Check } from "typebox/value";
 
 const objectOptions = { additionalProperties: false };
+
 const instruction = Type.String({ minLength: 1, maxLength: 2000 });
+
 const label = Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_]{0,63}$" });
+
 const relativePath = Type.String({ minLength: 1, maxLength: 1024 });
+
 const questionSchema = Type.Union([
   Type.Object({
     type: Type.Literal("bool"), instructions: instruction,
@@ -33,6 +37,7 @@ const fileSelectionSchema = Type.Union([
     paths: Type.Array(relativePath, { minItems: 1, maxItems: 200 }),
   }, objectOptions),
 ]);
+
 const fileClassificationRequestSchema = Type.Object({
   mode: Type.Optional(Type.Literal("classify")),
   selection: fileSelectionSchema,
@@ -50,12 +55,15 @@ export const fileClassificationInputSchema = Type.Union([
 
 /** Relative file selection shared by preview and classification; ignore rules always apply. */
 export type FileSelection = Static<typeof fileSelectionSchema>;
+
 /** A remote classification request; omitted mode remains classification for existing callers. */
 export type FileClassificationRequest = Static<typeof fileClassificationRequestSchema>;
-/** Validated input variants; preview cannot carry questions or upload options. */
+
+/** Schema-derived input variants; runtime checks also enforce paths, keys, and byte limits. */
 export type FileClassificationInput = Static<typeof fileClassificationInputSchema>;
 
 const probability = Type.Number({ minimum: 0, maximum: 1 });
+
 const answerSchema = Type.Union([
   Type.Object({ type: Type.Literal("bool"), probability }, objectOptions),
   Type.Object({
@@ -65,10 +73,12 @@ const answerSchema = Type.Union([
   }, objectOptions),
   Type.Object({ type: Type.Literal("score"), score: Type.Number({ minimum: 0, maximum: 9 }), confidence: probability }, objectOptions),
 ]);
+
 /** Typed classifier answers; callers must also check question coverage and criterion bounds. */
 export const fileClassificationAnswersSchema = Type.Record(label, answerSchema, {
   minProperties: 1, maxProperties: 8, propertyNames: label, additionalProperties: answerSchema,
 });
+
 const reasonSchema = Type.Union([
   Type.Literal("excluded"), Type.Literal("not-eligible"), Type.Literal("symlink"),
   Type.Literal("not-regular"), Type.Literal("oversized"), Type.Literal("binary"),
@@ -76,7 +86,9 @@ const reasonSchema = Type.Union([
   Type.Literal("provider-error"), Type.Literal("invalid-answer"), Type.Literal("cancelled"),
   Type.Literal("deadline"), Type.Literal("scan-limit"),
 ]);
+
 const count = Type.Integer({ minimum: 0 });
+
 const fileOutcomeSchema = Type.Union([
   Type.Object({
     status: Type.Literal("classified"), path: relativePath, bytes: count,
@@ -116,35 +128,49 @@ export const fileClassificationOutputSchema = Type.Object({
 
 /** A source-free scan result with explicit coverage accounting. */
 export type FileClassificationOutput = Static<typeof fileClassificationOutputSchema>;
+
 /** One whole-file outcome; failed and skipped files never receive fabricated answers. */
 export type FileClassificationOutcome = FileClassificationOutput["files"][number];
+
 /** Stable scan-level failures, translated by the Pi tool entrypoint. */
 export type FileScanError = NonNullable<FileClassificationOutput["error"]>;
 
 const reservedKeys = new Set(["__proto__", "prototype", "constructor"]);
 
 /** Parse dynamic questions and selection without erasing their schema-established types. */
-export function parseFileClassificationInput(value: unknown):
+export function parseFileClassificationInput(
+  // oxlint-disable-next-line anti-slop/no-unknown-parameters -- External input stays unknown until schema and semantic checks pass.
+  value: unknown,
+):
   | { readonly status: "ok"; readonly input: FileClassificationInput }
   | { readonly status: "error"; readonly error: FileScanError } {
   const invalid = { status: "error", error: { tag: "InvalidRequest", message: "Jev files request is invalid. Use bounded relative paths and typed questions." } } as const;
+
   if (!Check(fileClassificationInputSchema, value)) return invalid;
+
   if (value.mode !== "preview") {
     if (Buffer.byteLength(JSON.stringify(value.questions)) > 16 * 1024) return invalid;
+
     for (const [key, question] of Object.entries(value.questions)) {
       if (reservedKeys.has(key)) return invalid;
+
       if (question.type === "choice" && Object.keys(question.criteria).some(key => reservedKeys.has(key))) return invalid;
     }
   }
+
   const paths = value.selection.kind === "paths"
     ? value.selection.paths
     : [...value.selection.include, ...(value.selection.exclude ?? [])];
+
   for (const path of paths) {
     // Only portable slash-separated paths; globs support *, **, ?, and character classes.
     if (path.startsWith("/") || path.includes("\\") || path.includes("\0") ||
         path.split("/").some(part => part === ".." || part === "." || part === "") ||
+        // oxlint-disable-next-line no-control-regex -- Control characters are invalid in project paths.
         /[\x01-\x1f\x7f]/u.test(path) || /^[A-Za-z]:/u.test(path)) return invalid;
+
     if (value.selection.kind === "globs" && /[{}()!]/u.test(path)) return invalid;
   }
+
   return { status: "ok", input: value };
 }

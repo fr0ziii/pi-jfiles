@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { parseFileClassificationInput } from "./file-classification-contract.ts";
+import { parseFileClassificationInput } from "../src/file-classification-contract.ts";
 import { testRequest } from "./test-fixtures.ts";
 
 test("preview accepts selection only, while classification still requires questions", () => {
@@ -14,6 +14,7 @@ test("preview accepts selection only, while classification still requires questi
     assert.equal(parseFileClassificationInput({ mode: "classify", selection }).status, "error");
     assert.equal(parseFileClassificationInput({ selection }).status, "error");
   }
+
   const request = testRequest();
   assert.equal(parseFileClassificationInput(request).status, "ok");
   assert.equal(parseFileClassificationInput({ ...request, mode: "classify" }).status, "ok");
@@ -22,10 +23,13 @@ test("preview accepts selection only, while classification still requires questi
 test("dynamic map labels stay constrained when their declarations expose values", () => {
   const question = testRequest().questions.relevant;
   assert.ok(question);
+
   for (const key of ["bad label", "1bad", "__proto__", "prototype", "constructor", "x".repeat(65)]) {
     assert.equal(parseFileClassificationInput({ ...testRequest(), questions: Object.fromEntries([[key, question]]) }).status, "error", key);
+
     const choice = { type: "choice", instructions: "Which role?",
       criteria: Object.fromEntries([["valid", "First role"], [key, "Second role"]]) };
+
     assert.equal(parseFileClassificationInput({ ...testRequest(), questions: { role: choice } }).status, "error", key);
   }
 });
@@ -41,6 +45,7 @@ test("accepts task-specific bool, choice, and score questions together", () => {
 
 test("rejects malformed and unbounded requests at the tool boundary", () => {
   const request = testRequest();
+
   const invalid: unknown[] = [
     null, {}, { ...request, source: "bypass" }, { ...request, provider: "other" },
     { ...request, questions: {} },
@@ -51,6 +56,7 @@ test("rejects malformed and unbounded requests at the tool boundary", () => {
     { ...request, questions: { wrong: { type: "score", instructions: "?", criteria: [] } } },
     { ...request, questions: { wrong: { type: "choice", instructions: "?", criteria: { "bad label": "one", other: "two" } } } },
   ];
+
   for (const value of invalid) assert.equal(parseFileClassificationInput(value).status, "error");
 });
 
@@ -58,6 +64,7 @@ test("rejects absolute paths, traversal, controls, and unsupported glob syntax",
   for (const path of ["/tmp/a.ts", "../a.ts", "src/../a.ts", "./a.ts", "a//b.ts", "C:/a.ts", "a\\b.ts", "a\nb.ts", "a\0b.ts"]) {
     assert.equal(parseFileClassificationInput(testRequest([path])).status, "error", path);
   }
+
   for (const glob of ["src/{a,b}.ts", "src/!(a).ts", "../**/*.ts"]) {
     const request = { ...testRequest(), selection: { kind: "globs", include: [glob] } };
     assert.equal(parseFileClassificationInput(request).status, "error", glob);

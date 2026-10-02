@@ -14,10 +14,10 @@
     "url": "https://github.com/fr0ziii/pi-jfiles/issues"
   },
   "files": [
-    "index.ts",
-    "file-classification-contract.ts",
-    "file-classification.ts",
-    "file-selection.ts",
+    "src/index.ts",
+    "src/file-classification-contract.ts",
+    "src/file-classification.ts",
+    "src/file-selection.ts",
     "README.md",
     "docs/"
   ],
@@ -30,14 +30,15 @@
     "node": ">=24.8.0"
   },
   "scripts": {
-    "check": "npm run typecheck && npm test",
+    "check": "npm run lint && npm run typecheck && npm test",
+    "lint": "oxlint --deny-warnings --report-unused-disable-directives .",
     "typecheck": "tsc --noEmit",
-    "test": "node --import tsx --test *.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
     "prepublishOnly": "npm run check"
   },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./src/index.ts"
     ]
   },
   "peerDependencies": {
@@ -48,9 +49,14 @@
   "devDependencies": {
     "@earendil-works/pi-ai": "0.99.1",
     "@earendil-works/pi-coding-agent": "0.99.1",
-    "typebox": "^1.3.27",
+    "@oxlint/plugins": "1.86.0",
     "@types/node": "^24.5.2",
+    "oxlint": "1.86.0",
     "tsx": "^4.20.5",
+    "typebox": "^1.3.27",
     "typescript": "^5.9.2"
+  },
+  "dependencies": {
+    "effect": "4.0.0"
   }
 }

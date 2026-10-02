@@ -35,7 +35,8 @@ results, tests, documentation, installation, and dependency risks.
 
 Do not add fixed audit presets, generated questions, custom HTTP clients,
 MCP servers, virtual-model routers, background scans, or persistent source caches.
-Use plain TypeScript, not Effect or a workflow framework.
+Use Effect for runtime I/O, concurrency, deadlines, clocks, and cleanup.
+Keep pure logic in TypeScript and public contracts in TypeBox.
 Code-window localization, caching, provider selection, and new registered tools
 are outside this revision.
 
@@ -422,7 +423,8 @@ Review cleanup on reload and session shutdown. Do not leave an unhandled
 rejection or assume that an aborted provider promise has settled. Report any
 lifecycle ownership defect before adding another scheduler or shutdown layer.
 
-Retain the injected duration clock and explicit runtime seam for tests.
+Use the Effect Clock for duration and deadlines. Retain the explicit Pi runtime
+seam for tests. Drive temporal tests with TestClock and readiness signals.
 The runner reports valid provider usage, including billed error responses.
 Codemode/Pi session totals receive nested usage once. Late usage after a returned
 deadline cannot be added to that result. `bytesSubmitted` and `requests` count
@@ -436,17 +438,18 @@ interpretation and record any mismatch found in session totals.
 
 ## 9. Module ownership and change locations
 
-Runtime modules, tests, and development configuration live at the repository
-root. This review record lives under `docs/`.
+Runtime modules live under `src/`. Tests and fixtures live under `tests/`.
+Development configuration stays at the repository root. This review record lives
+under `docs/`.
 
 | File | Owns | Review/change focus |
 | --- | --- | --- |
-| `index.ts` | Pi registration, consent flag, auth/model resolution, tool results | One registration; accurate description; source-free errors and nested usage |
-| `file-classification-contract.ts` | Input/output schemas and parser | Input union; typed maps; key/count/byte checks; output compatibility |
-| `file-selection.ts` | Discovery, exclusions, metadata, safe reads | Shared selection type; narrow exclusions; preserve read safeguards |
-| `file-classification.ts` | Runner, coverage, deadlines, capacity, answers, usage | Mode narrowing; consent ordering; retain lifecycle and result invariants |
-| `test-fixtures.ts` | Synthetic projects, requests, runtime responses | Distinct preview/classification fixtures without invalid casts |
-| Colocated tests | Contract, selection, runner, real Pi/codemode evidence | Regression matrix below |
+| `src/index.ts` | Pi registration, consent flag, auth/model resolution, tool results | One registration; accurate description; source-free errors and nested usage |
+| `src/file-classification-contract.ts` | Input/output schemas and parser | Input union; typed maps; key/count/byte checks; output compatibility |
+| `src/file-selection.ts` | Discovery, exclusions, metadata, safe reads | Shared selection type; narrow exclusions; preserve read safeguards |
+| `src/file-classification.ts` | Runner, coverage, deadlines, capacity, answers, usage | Mode narrowing; consent ordering; retain lifecycle and result invariants |
+| `tests/test-fixtures.ts` | Synthetic projects, requests, runtime responses | Distinct preview/classification fixtures without invalid casts |
+| `tests/*.test.ts` | Contract, selection, runner, real Pi/codemode evidence | Regression matrix below |
 | `package.json`, lockfile, `tsconfig.json` | Dependencies and checks | Strict types; host peers; no new runtime dependency without need |
 | `README.md` | Installation, safety, examples, limitations | Selection-only preview; restart guidance; exact exclusion behavior |
 | This review record | Design and review status | Links and evidence stay consistent |
@@ -690,3 +693,89 @@ publication. No npm package or GitHub repository was published at that stage.
 MIT is now confirmed for the release. Public npm installation and removal of
 the original dotfiles copy are separate release validation gates. No remote
 TypeSafe submission was made.
+
+## 15. Effect runtime and Oxlint
+
+Effect owns runtime I/O, concurrent work, deadlines, clocks, and cleanup.
+TypeBox remains the public tool contract owner. The tool name, input variants,
+output schema, consent rule, limits, retries, and Pi transport stay unchanged.
+The internal runner and selection operations now return Effects, not Promises.
+
+The runner keeps its explicit interface and extension-owned construction.
+Pi supplies an operation-specific runtime from the current tool context.
+Keep that capability value explicit; a second Context tag and Layer graph would
+duplicate the existing seam for this single entrypoint. Use the built-in Effect
+Clock instead of a custom clock interface. Duration uses monotonic nanoseconds,
+converted to integer milliseconds. Keep pure validation and usage logic local.
+
+Effect semaphores replace the custom request queue and scan counter.
+Effect forEach replaces the worker loop. Effect races and timeoutOrElse replace
+manual deadline timers and withAbort. The provider callback boundary transfers
+permit ownership to the native Promise. Both settlement branches release exactly
+once. Interruption aborts the provider signal but cannot release its permit.
+The synchronous Effect execution at that native settlement boundary is limited
+to releasing the permit. No detached provider fiber or replacement capacity is
+introduced.
+
+File handles and discovery processes use acquireUseRelease. Native handle I/O
+finishes before handle cleanup. Discovery cleanup kills and awaits its child,
+including spawn failure. Callback listeners are removed. Metadata operations
+that Node cannot cancel may still settle after interruption; they read no source
+and own no handles. Cancellation is not an OS sandbox.
+
+Tests retain Node's runner and the real Pi SDK integration rather than adding a
+second test framework. Temporal tests provide TestClock and use Deferred for
+readiness. Native Promises are controlled at the actual Pi runtime seam.
+Tests cover caller and Effect interruption, request and scan deadlines, queued
+file coverage, shared capacity, late success and rejection, unchanged returned
+results, model-resolution cancellation, missing ripgrep, and discovery-process
+cleanup. Tests also verify that skipped content returns local permits.
+The macOS non-UTF-8 filename limitation remains a reported skip.
+
+Oxlint runs through the root check command. Its configuration is the rule source
+of truth. Positive and negative fixtures exercise that configuration. This is
+syntax/local-pattern enforcement, not type-aware analysis or proof of lifecycle
+safety. TypeScript and resource tests remain separate gates.
+
+The archive contains the same eight shipped files. Effect is an exact runtime
+dependency; Oxlint is an exact development dependency. The archive test installs
+runtime dependencies offline from the npm cache before loading the installed
+package through Pi. Local directory packages need their dependencies installed.
+The TypeScript target is ES2024, compatible with the existing Node requirement,
+so native Promise.withResolvers can be used in test controls.
+
+Verification: the strict check ran 42 tests: 41 passed and the known filename
+fixture was skipped. Archive inspection and whitespace checks passed.
+The dependency audit still reports one high-severity brace-expansion finding
+under the pinned Pi development dependency. The runtime-only audit reports no
+findings; it does not assess the separately installed Pi host. No upstream patch
+was applied. No live TypeSafe request or paid source submission was made.
+
+## 16. anti-slop policy and cleanup
+
+The generic and all optional Effect plugins are vendored in
+tools/oxlint/anti-slop. The recorded source, tests, licenses, and provenance
+remain unchanged. The root Oxlint configuration owns the enabled rules.
+The vendor tree stays outside application lint, typechecking, and the npm archive.
+
+Spacing fixes were applied separately from semantic edits. Conditional object
+construction now uses assignments. Absent usage remains absent, not a property
+set to undefined. Lint subprocess failures use TypeBox checks. The local HTTP
+fixture checks the address object returned by Node.
+
+The internal classifier accepts the TypeBox-derived input union. It still calls
+the parser before filesystem or provider access. Static types cannot enforce
+portable paths, strict objects, reserved keys, or payload byte limits. Raw parser
+input remains unknown, with one documented line-scoped lint exception. No cast,
+duplicate schema, or second parser was added. Tests cover schema-shaped invalid
+requests and positive and negative TypeScript calls through this interface.
+
+The scan-deadline test also provides TestClock to its follow-up scan. That scan
+previously used a real 20 ms deadline and could fail under filesystem load.
+The test now checks the follow-up duration with the controlled clock.
+
+Verification: npm run check passed 44 tests, with the known macOS filename
+fixture skipped. All 24 vendored rule test files passed. Whitespace and archive
+checks passed; the archive still contains eight files and excludes local tooling.
+The runtime-only dependency audit is clean. The existing high-severity Pi
+development-dependency finding remains. No live TypeSafe request was made.
