@@ -53,7 +53,10 @@ test("npm archive installs in isolated Pi and preserves one tool, local preview,
     "package/src/file-selection.ts",
     "package/package.json",
     "package/README.md",
-    "package/docs/jev-file-classification-plan.md",
+    "package/CONTEXT.md",
+    "package/docs/architecture.md",
+    "package/docs/security.md",
+    "package/docs/development.md",
     "package/LICENSE",
   ].sort());
 

@@ -1,9 +1,11 @@
 # pi-jfiles
 
 This repository contains one Pi extension. Runtime modules are in `src/`.
-Tests and fixtures are in `tests/`. Read `README.md` for installation and use. Read
-`docs/jev-file-classification-plan.md` when changing contracts, selection rules,
-resource ownership, or verification requirements.
+Tests and fixtures are in `tests/`. Read `README.md` for installation and use.
+Read `docs/architecture.md` when changing contracts, module ownership,
+concurrency, or cleanup. Read `docs/security.md` when changing selection, source
+reads, consent, or diagnostics. Read `docs/development.md` when changing checks,
+dependencies, or packaging.
 
 ## Changes
 

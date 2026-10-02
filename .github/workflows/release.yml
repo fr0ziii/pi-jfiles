@@ -1,0 +1,152 @@
+name: Publish release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# Serialize publications; do not interrupt an active registry write.
+concurrency:
+  group: npm-release-pi-jfiles
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  verify:
+    name: Verify release and create archive
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PI_OFFLINE: "1"
+    outputs:
+      dist-tag: ${{ steps.version.outputs.dist-tag }}
+      archive-sha256: ${{ steps.pack.outputs.sha256 }}
+      artifact-id: ${{ steps.archive.outputs.artifact-id }}
+    steps:
+      - name: Check out the release commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Validate release tag and package versions
+        id: version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          node <<'NODE'
+          const assert = require("node:assert/strict");
+          const { appendFileSync } = require("node:fs");
+          const manifest = require("./package.json");
+          const lock = require("./package-lock.json");
+
+          assert.equal(manifest.name, "pi-jfiles");
+          assert.equal(process.env.RELEASE_TAG, `v${manifest.version}`, "Release tag must match package.json");
+          assert.equal(lock.version, manifest.version, "Lockfile version must match package.json");
+          assert.equal(lock.packages[""].version, manifest.version, "Lockfile root version must match package.json");
+          assert.ok(!manifest.version.includes("+"), "npm release versions must not use build metadata");
+
+          const prerelease = manifest.version.includes("-");
+          assert.equal(process.env.RELEASE_PRERELEASE, String(prerelease), "GitHub prerelease flag must match the version");
+          appendFileSync(process.env.GITHUB_OUTPUT, `dist-tag=${prerelease ? "next" : "latest"}\n`);
+          NODE
+
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run lint, typechecking, and tests
+        run: npm run check
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev
+
+      - name: Report full dependency audit (non-blocking)
+        continue-on-error: true
+        run: npm audit
+
+      - name: Inspect package contents
+        run: npm pack --dry-run --ignore-scripts
+
+      - name: Create and fingerprint the release archive
+        id: pack
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/npm-package"
+          npm pack --ignore-scripts --pack-destination "$RUNNER_TEMP/npm-package"
+          set -- "$RUNNER_TEMP/npm-package/"*.tgz
+          test "$#" -eq 1 && test -f "$1"
+          tar -xOf "$1" package/package.json | node -e '
+            const assert = require("node:assert/strict");
+            const manifest = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+            assert.equal(manifest.name, "pi-jfiles");
+            assert.equal(`v${manifest.version}`, process.env.RELEASE_TAG);
+          '
+          digest=$(sha256sum "$1")
+          printf 'sha256=%s\n' "${digest%% *}" >> "$GITHUB_OUTPUT"
+
+      - name: Store the checked release archive
+        id: archive
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: npm-package
+          path: ${{ runner.temp }}/npm-package/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish checked archive to npm
+    needs: verify
+    if: github.repository == 'fr0ziii/pi-jfiles'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      # No checkout, project dependencies, or project lifecycle scripts in this job.
+      - name: Set up Node.js for trusted publishing
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+
+      - name: Install an OIDC-capable npm CLI
+        run: npm install --global npm@11.19.1 --ignore-scripts --no-audit --no-fund
+
+      - name: Download the verified archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          artifact-ids: ${{ needs.verify.outputs.artifact-id }}
+          path: npm-package
+          merge-multiple: true
+
+      - name: Verify archive integrity and publish with provenance
+        env:
+          PACKAGE_SHA256: ${{ needs.verify.outputs.archive-sha256 }}
+          NPM_DIST_TAG: ${{ needs.verify.outputs.dist-tag }}
+        run: |
+          set -- npm-package/*.tgz
+          test "$#" -eq 1 && test -f "$1"
+          printf '%s  %s\n' "$PACKAGE_SHA256" "$1" | sha256sum --check -
+          npm publish "$1" --ignore-scripts --access public --provenance --tag "$NPM_DIST_TAG"

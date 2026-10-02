@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  check:
+    name: Check extension and package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      PI_OFFLINE: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install ripgrep
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes ripgrep
+
+      - name: Install locked dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Run lint, typechecking, and tests
+        run: npm run check
+
+      - name: Inspect package contents
+        run: npm pack --dry-run --ignore-scripts
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev
+
+      # Pi's known development dependency advisory is reported, not hidden.
+      - name: Report full dependency audit (non-blocking)
+        continue-on-error: true
+        run: npm audit

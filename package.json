@@ -19,6 +19,7 @@
     "src/file-classification.ts",
     "src/file-selection.ts",
     "README.md",
+    "CONTEXT.md",
     "docs/"
   ],
   "publishConfig": {
