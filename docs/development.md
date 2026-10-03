@@ -32,12 +32,46 @@ those checks only, not dependency safety or live provider behavior.
 
 | Tests | Verify |
 | --- | --- |
-| file-classification-contract.test.ts | Input variants, typed maps, key/path/count/byte restrictions |
+| file-classification-contract.test.ts | Reserved keys, label boundaries, portable paths/globs, question criteria and byte limits |
 | file-selection.test.ts | Real ripgrep, exclusions, metadata-only preview, safe reads, budgets, child cleanup |
 | file-classification.test.ts | Answers, coverage, usage, consent ordering, deadlines, shared capacity, cancellation |
 | codemode-integration.test.ts | Real Pi registration, generated declarations, nested calls, local TypeSafe transport |
 | lint-policy.test.ts and anti-slop-policy.test.ts | Accepted and rejected fixtures through the root lint configuration |
 | package-installation.test.ts | Exact archive contents, isolated Pi installation, preview, consent refusal, removal |
+
+The Pi E2E tests own ordinary input variants, multi-question classification,
+path follow-up, tool declarations, local transport, and installed-package use.
+Do not repeat those scenarios in parser-only tests.
+
+### Failure inventory for retained focused checks
+
+These checks cover failures that the current E2E scenarios do not exercise:
+
+- Request validation: reserved question and choice keys, label boundaries,
+  incomplete criteria, unsafe paths/globs, and aggregate question bytes.
+  The runner must also reject invalid input before discovery or submission;
+  Pi can reject E2E input before it reaches that boundary.
+- Classifier responses: missing/extra answers, wrong answer types, invalid
+  probabilities or choice distributions, out-of-range scores, fractional scores,
+  provider errors/throws/aborts, context overflow, and leaked error payloads.
+- Accounting and contracts: duplicate-path submissions, source alteration,
+  retries, missing digests/signals, incomplete coverage, billed errors, absent
+  versus zero/invalid usage, unknown versus catalog pricing, and widened runner
+  input or Effect result types.
+- Runtime lifecycle: excess active scans or requests, cancellation before or
+  during model resolution, premature or missing permit release, deadlines that
+  wait for ignored aborts, omitted queued outcomes, late result mutation, direct
+  Effect interruption, and incorrect elapsed time. Controlled clocks and native
+  Promise settlement expose these failures without live-provider timing.
+- File selection and reads: missing ripgrep, child cleanup after cancellation,
+  ignore/exclusion bypass, overbroad credential rules, content reads in preview,
+  symlink escape, cross-root or stale snapshots, oversized/binary/invalid UTF-8
+  source, Unicode/BOM corruption, incorrect digests, empty matches, invalid path
+  encoding, and exceeded file/byte budgets. Reader-interface checks control the
+  change between selection and read; ordinary E2E scans do not.
+- Lint policy: missing rules, wrong diagnostics, or rejection of supported
+  syntax. These checks run the real CLI with the root configuration; extension
+  E2E execution does not check development policy.
 
 Temporal tests use Effect TestClock, Deferred readiness signals, and controlled
 native Promises. Keep follow-up operations on the controlled clock when a short

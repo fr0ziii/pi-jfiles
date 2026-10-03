@@ -7,7 +7,7 @@ import type { FileClassificationInput } from "../src/file-classification-contrac
 import { createFileClassifier, type FileClassifierRun } from "../src/file-classification.ts";
 import { createTestProject, hasValidCoverage, testClassifierModel, testClassifierResponse, testRequest, testRuntime } from "./test-fixtures.ts";
 
-test("classifies three dynamic questions per whole file in one request and supports path follow-up", async t => {
+test("deduplicates exact paths and submits whole source without retries", async t => {
   const source = "SOURCE_ONLY_IN_CLASSIFIER: calculateProratedCharge()";
   const root = await createTestProject(t, { "src/example.ts": source, "src/other.ts": "other" });
   const request = testRequest(["src/example.ts", "src/other.ts", "src/example.ts"]);
@@ -37,8 +37,6 @@ test("classifies three dynamic questions per whole file in one request and suppo
   assert.ok(first?.status === "classified");
   assert.deepEqual(Object.keys(first.answers).sort(), ["layer", "relevant", "risk"]);
   assert.equal(first.digest.length, 64);
-  const followup = await Effect.runPromise(runner.run(root, testRequest([first.path]), testRuntime()));
-  assert.equal(followup.result.summary.classified, 1);
 });
 
 test("schema-shaped invalid requests fail before discovery or provider access", async () => {

@@ -26,6 +26,14 @@ dependencies, or packaging.
 - Keep runtime modules in the npm file list. Keep tests and fixtures in Git.
 - Use Simplified Technical English in documentation.
 
+## Testing
+
+- Never write unit tests after writing code. Write required unit tests first.
+- Highly prefer E2E tests as the sole testing mechanism for complex features.
+  End E2E tests with a verifiable, repeatable artifact.
+- Before testing a system in isolation, document all its possible failure modes,
+  then write the code.
+
 ## Checks
 
 Run `npm run check` and `git diff --check`. After package content changes,

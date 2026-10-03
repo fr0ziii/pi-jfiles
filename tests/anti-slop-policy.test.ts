@@ -62,8 +62,7 @@ test("root anti-slop configuration loads generic and all optional Effect rules",
     ["tag-construction.ts", "no-manual-tagged-construction"],
     ["constructor-import.ts", "no-service-constructor-imports"],
     ["manual-match.ts", "prefer-effect-match"],
-  ]) {
-    assert.ok(path && rule);
+  ] as const) {
     await assert.rejects(lint(path), cause => {
       if (!Check(lintFailureSchema, cause)) return false;
 

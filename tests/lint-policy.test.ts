@@ -33,8 +33,7 @@ test("root Oxlint policy accepts typed values and rejects unsafe syntax", async 
     ["explicit-any.ts", "no-explicit-any"],
     ["non-null.ts", "no-non-null-assertion"],
     ["assertion.ts", "consistent-type-assertions"],
-  ]) {
-    assert.ok(path && rule);
+  ] as const) {
     await assert.rejects(lint(path), error => {
       if (!(error instanceof Error) || !Check(lintFailureSchema, error)) return false;
 
