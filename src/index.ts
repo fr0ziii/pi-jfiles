@@ -1,6 +1,6 @@
 import type { AgentToolResult, ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Effect } from "effect";
-import { fileClassificationInputSchema, fileClassificationOutputSchema } from "./file-classification-contract.ts";
+import { scanInputSchema, scanResultSchema } from "./file-classification-contract.ts";
 import { createFileClassifier } from "./file-classification.ts";
 
 /** Register whole-file semantic classification as a structured codemode-only tool. */
@@ -16,8 +16,8 @@ export default function registerJevFiles(pi: ExtensionAPI): void {
     exposure: "codemode",
     annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true },
     description: "Classify whole project files with dynamic bool, choice, or score questions using TypeSafe Jev. Use mode: preview with selection only; it needs no questions, credentials, or remote consent and reads only metadata. Classification requires questions; omitted mode is classify. Paths and basic recursive globs are relative to cwd and preserve ignore rules. Excludes credentials, dependencies, generated directories, and symlinks. Bounds: 200 files, 64 KiB/file, 5 MiB source, 8 questions, 4 shared requests. Output contains answers and coverage, never source. Scores use zero-based criteria indices. Missing answers mean no evidence; confidence does not prove correctness. For follow-up use exact paths, then read only relevant files. Remote classification requires starting Pi with --jev-files-allow-remote; /reload cannot grant this permission.",
-    parameters: fileClassificationInputSchema,
-    outputSchema: fileClassificationOutputSchema,
+    parameters: scanInputSchema,
+    outputSchema: scanResultSchema,
     async execute(_toolCallId, args, signal, _onUpdate, ctx) {
       const run = await Effect.runPromise(classifier.run(ctx.cwd, args, {
         allowRemote: pi.getFlag("jev-files-allow-remote") === true,

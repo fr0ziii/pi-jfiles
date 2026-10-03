@@ -4,7 +4,7 @@ import { lstat, open, realpath } from "node:fs/promises";
 import { extname, isAbsolute, join, matchesGlob, relative, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { Effect } from "effect";
-import type { FileSelection, FileClassificationOutcome, FileScanError } from "./file-classification-contract.ts";
+import type { FileSelection, FileResult, ScanError } from "./file-classification-contract.ts";
 
 const MAX_FILE_BYTES = 64 * 1024;
 
@@ -27,28 +27,28 @@ const deniedNames = new Set([
 ]);
 
 /** A preflight file identity; reads must match it before source is submitted. */
-export interface SelectedSourceFile {
+export interface SelectedFile {
   readonly path: string;
   readonly absolutePath: string;
   readonly stat: Stats;
 }
 
 /** Bounded file selection; skipped files remain visible in the coverage report. */
-export interface SourceSelection {
+export interface SelectedFiles {
   readonly root: string;
   readonly discovered: number;
   readonly selected: number;
-  readonly candidates: readonly SelectedSourceFile[];
-  readonly outcomes: readonly FileClassificationOutcome[];
+  readonly candidates: readonly SelectedFile[];
+  readonly outcomes: readonly FileResult[];
 }
 
 /** Read-only project selection with ignore rules, safe exclusions, and preflight budgets. */
-export const selectSourceFiles = Effect.fn("selectSourceFiles")(function*(
+export const selectFiles = Effect.fn("selectFiles")(function*(
   cwd: string, selection: FileSelection,
-): Effect.fn.Return<SourceSelection, FileScanError> {
+): Effect.fn.Return<SelectedFiles, ScanError> {
   const root = yield* Effect.tryPromise({
     try: () => realpath(cwd),
-    catch: (): FileScanError => ({ tag: "DiscoveryFailed", message: "Jev files cannot open the project directory." }),
+    catch: (): ScanError => ({ tag: "DiscoveryFailed", message: "Jev files cannot open the project directory." }),
   });
 
   const discovered = yield* discoverProjectFiles(root);
@@ -60,18 +60,18 @@ export const selectSourceFiles = Effect.fn("selectSourceFiles")(function*(
       : discovered.filter(path =>
           selection.include.some(glob => matchesGlob(path, glob)) &&
           !(selection.exclude ?? []).some(glob => matchesGlob(path, glob))),
-    catch: (): FileScanError => ({ tag: "InvalidRequest", message: "Jev files glob is not supported." }),
+    catch: (): ScanError => ({ tag: "InvalidRequest", message: "Jev files glob is not supported." }),
   });
 
   paths.sort();
 
-  if (paths.length > 200) return yield* Effect.fail<FileScanError>({ tag: "ScanLimit", message: "Jev files selection exceeds 200 files. Narrow the selection." });
-  const candidates: SelectedSourceFile[] = [];
-  const outcomes: FileClassificationOutcome[] = [];
+  if (paths.length > 200) return yield* Effect.fail<ScanError>({ tag: "ScanLimit", message: "Jev files selection exceeds 200 files. Narrow the selection." });
+  const candidates: SelectedFile[] = [];
+  const outcomes: FileResult[] = [];
   let bytes = 0;
 
   for (const path of paths) {
-    if (isExcludedSourcePath(path)) {
+    if (isExcludedFilePath(path)) {
       outcomes.push({ status: "skipped", path, reason: "excluded" });
       continue;
     }
@@ -105,7 +105,7 @@ export const selectSourceFiles = Effect.fn("selectSourceFiles")(function*(
 
     bytes += preflight.stat.size;
 
-    if (bytes > MAX_SCAN_BYTES) return yield* Effect.fail<FileScanError>({ tag: "ScanLimit", message: "Jev files selection exceeds 5 MiB. Narrow the selection." });
+    if (bytes > MAX_SCAN_BYTES) return yield* Effect.fail<ScanError>({ tag: "ScanLimit", message: "Jev files selection exceeds 5 MiB. Narrow the selection." });
     candidates.push(preflight);
   }
 
@@ -113,9 +113,9 @@ export const selectSourceFiles = Effect.fn("selectSourceFiles")(function*(
 });
 
 /** Read exactly one bounded UTF-8 file snapshot; cleanup waits for native I/O to settle. */
-export const readSelectedSource = Effect.fn("readSelectedSource")(function*(root: string, file: SelectedSourceFile): Effect.fn.Return<
+export const readSelectedFile = Effect.fn("readSelectedFile")(function*(root: string, file: SelectedFile): Effect.fn.Return<
   { readonly content: string; readonly digest: string; readonly bytes: number },
-  Exclude<FileClassificationOutcome, { status: "classified" | "preview" }>
+  Exclude<FileResult, { status: "classified" | "preview" }>
 > {
   const failed = (reason: "file-changed" | "unreadable") => ({ status: "failed", path: file.path, reason } as const);
 
@@ -178,7 +178,7 @@ function isWithinRoot(root: string, path: string): boolean {
   return part !== "" && !part.startsWith("../") && part !== ".." && !isAbsolute(part);
 }
 
-function isExcludedSourcePath(path: string): boolean {
+function isExcludedFilePath(path: string): boolean {
   const parts = path.toLowerCase().split("/");
   const name = parts.at(-1) ?? "";
 
@@ -212,7 +212,7 @@ function sameFileSnapshot(left: Stats, right: Stats): boolean {
     left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
 }
 
-const discoverProjectFiles = Effect.fn("discoverProjectFiles")(function*(root: string): Effect.fn.Return<string[], FileScanError> {
+const discoverProjectFiles = Effect.fn("discoverProjectFiles")(function*(root: string): Effect.fn.Return<string[], ScanError> {
   const args = ["--files", "--hidden", "--null", "--no-config", "--no-require-git",
     ...excludedDirectories.flatMap(directory => ["--glob", "!" + directory + "/**"]),
     ...piRuntimeDirectories.flatMap(directory => [
@@ -231,9 +231,9 @@ const discoverProjectFiles = Effect.fn("discoverProjectFiles")(function*(root: s
 
         return { child, closed, ignoreError };
       },
-      catch: (): FileScanError => ({ tag: "DiscoveryFailed", message: "Jev files discovery failed. Check that ripgrep is installed." }),
+      catch: (): ScanError => ({ tag: "DiscoveryFailed", message: "Jev files discovery failed. Check that ripgrep is installed." }),
     }),
-    ({ child }) => Effect.callback<string[], FileScanError>(resume => {
+    ({ child }) => Effect.callback<string[], ScanError>(resume => {
       const chunks: Buffer[] = [];
       let bytes = 0;
       let limited = false;
@@ -248,7 +248,7 @@ const discoverProjectFiles = Effect.fn("discoverProjectFiles")(function*(root: s
       };
 
       const onClose = (code: number | null) => {
-        const fail = (tag: FileScanError["tag"], message: string) => resume(Effect.fail({ tag, message }));
+        const fail = (tag: ScanError["tag"], message: string) => resume(Effect.fail({ tag, message }));
 
         if (limited) {
           fail("ScanLimit", "Jev files discovery exceeds its path budget.");
@@ -264,15 +264,15 @@ const discoverProjectFiles = Effect.fn("discoverProjectFiles")(function*(root: s
 
         const decoded = Effect.try({
           try: () => new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(Buffer.concat(chunks)),
-          catch: (): FileScanError => ({ tag: "DiscoveryFailed", message: "Jev files discovery contains a non-UTF-8 path." }),
+          catch: (): ScanError => ({ tag: "DiscoveryFailed", message: "Jev files discovery contains a non-UTF-8 path." }),
         });
 
         resume(decoded.pipe(Effect.flatMap(decodedPaths => {
           const paths = [...new Set(decodedPaths.split("\0").filter(Boolean))];
 
-          if (paths.some(path => path.length > 1024)) return Effect.fail<FileScanError>({ tag: "ScanLimit", message: "Jev files discovery contains a path over 1024 characters." });
+          if (paths.some(path => path.length > 1024)) return Effect.fail<ScanError>({ tag: "ScanLimit", message: "Jev files discovery contains a path over 1024 characters." });
 
-          if (paths.length > MAX_DISCOVERED_FILES) return Effect.fail<FileScanError>({ tag: "ScanLimit", message: "Jev files discovery exceeds 50000 paths." });
+          if (paths.length > MAX_DISCOVERED_FILES) return Effect.fail<ScanError>({ tag: "ScanLimit", message: "Jev files discovery exceeds 50000 paths." });
 
           return Effect.succeed(paths);
         })));

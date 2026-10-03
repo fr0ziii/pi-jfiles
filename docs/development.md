@@ -25,6 +25,57 @@ installs need dependencies installed first; Pi installs runtime dependencies for
 npm packages. Publish a new version before updating the npm installation.
 Keep only one active copy of the extension.
 
+## Naming
+
+Use the shortest name that is clear at a call site and unique in a project
+search. CONTEXT.md owns domain terms. A Scan is the complete operation; a
+Classification is model-produced evidence about one project file. Keep Question
+and Answer distinct from the criteria that define them.
+
+Types use PascalCase, operations use verb-object camelCase, module files use
+kebab-case, and fixed limits use UPPER_SNAKE_CASE. Use Input for caller arguments
+and Result for returned data. Reserve request terminology for provider transport.
+Keep file paths and the registered classify_files name unchanged.
+
+### Naming migration
+
+Direct TypeScript imports must use the new symbols below. This is a source-level
+change, not a change to the version 1 tool contract. There are no legacy aliases.
+
+| Previous symbol | Current symbol |
+| --- | --- |
+| FileClassificationInput | ScanInput |
+| FileClassificationRequest | ClassifyInput |
+| FileClassificationOutput | ScanResult |
+| FileClassificationOutcome | FileResult |
+| FileScanError | ScanError |
+| fileClassificationInputSchema | scanInputSchema |
+| fileClassificationRequestSchema (private) | classifyInputSchema (private) |
+| fileClassificationOutputSchema | scanResultSchema |
+| fileClassificationAnswersSchema | answersSchema |
+| parseFileClassificationInput | parseScanInput |
+| SelectedSourceFile | SelectedFile |
+| SourceSelection | SelectedFiles |
+| selectSourceFiles | selectFiles |
+| readSelectedSource | readSelectedFile |
+| isExcludedSourcePath (private) | isExcludedFilePath (private) |
+| testRequest (test fixture) | testScanInput (test fixture) |
+
+Failure modes to check before validating a naming change:
+
+- Imports, type-only uses, or embedded test scripts retain an old symbol.
+- Schema-derived input or result types lose precision or accepted input variants.
+- Schema keys, status values, diagnostics, consent flags, or provider fields change.
+- Effect span names no longer match renamed operations.
+- Documentation uses two names for one concept or describes classifications as
+  verified findings.
+- Runtime modules or required documents disappear from the npm archive.
+
+Use the existing compiler contract checks, parser checks, Pi codemode E2E, and
+package installation E2E. Compare serialized schema fingerprints before and
+after the migration. Naming-only changes do not need new unit tests or generated
+property cases; the accepted values and invariants are unchanged.
+
 ## Verification
 
 npm run check runs lint, typechecking, and project tests. Its success establishes

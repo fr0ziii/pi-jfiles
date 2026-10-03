@@ -50,8 +50,13 @@ repeats selection and read checks.
 
 ## Contract ownership
 
-TypeBox owns the input and output schemas. Public types derive from these
+TypeBox owns scanInputSchema, scanResultSchema, and answersSchema. ScanInput,
+ClassifyInput, ScanResult, FileResult, and ScanError derive from the owning
 schemas; there is no second Effect schema or handwritten codemode declaration.
+ScanInput accepts preview or classification, while ClassifyInput accepts only
+classification. FileSelection describes caller scope; SelectedFiles contains
+selected file snapshots and selection outcomes. Naming rules and the symbol
+migration map are in development.md.
 
 Preview requires explicit mode: "preview" and accepts selection only.
 Classification requires questions; omitted mode remains classification.

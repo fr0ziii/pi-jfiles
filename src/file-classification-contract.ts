@@ -38,7 +38,7 @@ const fileSelectionSchema = Type.Union([
   }, objectOptions),
 ]);
 
-const fileClassificationRequestSchema = Type.Object({
+const classifyInputSchema = Type.Object({
   mode: Type.Optional(Type.Literal("classify")),
   selection: fileSelectionSchema,
   // Pi renders additionalProperties, not patternProperties. propertyNames retains key restrictions.
@@ -47,20 +47,20 @@ const fileClassificationRequestSchema = Type.Object({
   }),
 }, objectOptions);
 
-/** One file tool input: selection-only preview or classification with required questions. */
-export const fileClassificationInputSchema = Type.Union([
+/** Scan input: selection-only preview or classification with required questions. */
+export const scanInputSchema = Type.Union([
   Type.Object({ mode: Type.Literal("preview"), selection: fileSelectionSchema }, objectOptions),
-  fileClassificationRequestSchema,
+  classifyInputSchema,
 ]);
 
 /** Relative file selection shared by preview and classification; ignore rules always apply. */
 export type FileSelection = Static<typeof fileSelectionSchema>;
 
-/** A remote classification request; omitted mode remains classification for existing callers. */
-export type FileClassificationRequest = Static<typeof fileClassificationRequestSchema>;
+/** Classification input; omitted mode remains classification for existing callers. */
+export type ClassifyInput = Static<typeof classifyInputSchema>;
 
 /** Schema-derived input variants; runtime checks also enforce paths, keys, and byte limits. */
-export type FileClassificationInput = Static<typeof fileClassificationInputSchema>;
+export type ScanInput = Static<typeof scanInputSchema>;
 
 const probability = Type.Number({ minimum: 0, maximum: 1 });
 
@@ -75,7 +75,7 @@ const answerSchema = Type.Union([
 ]);
 
 /** Typed classifier answers; callers must also check question coverage and criterion bounds. */
-export const fileClassificationAnswersSchema = Type.Record(label, answerSchema, {
+export const answersSchema = Type.Record(label, answerSchema, {
   minProperties: 1, maxProperties: 8, propertyNames: label, additionalProperties: answerSchema,
 });
 
@@ -89,11 +89,11 @@ const reasonSchema = Type.Union([
 
 const count = Type.Integer({ minimum: 0 });
 
-const fileOutcomeSchema = Type.Union([
+const fileResultSchema = Type.Union([
   Type.Object({
     status: Type.Literal("classified"), path: relativePath, bytes: count,
     digest: Type.String({ pattern: "^[a-f0-9]{64}$" }),
-    answers: fileClassificationAnswersSchema,
+    answers: answersSchema,
   }, objectOptions),
   Type.Object({ status: Type.Literal("preview"), path: relativePath, bytes: count }, objectOptions),
   Type.Object({
@@ -103,7 +103,7 @@ const fileOutcomeSchema = Type.Union([
 ]);
 
 /** Structured scan output for codemode; it contains no scanned source or provider error body. */
-export const fileClassificationOutputSchema = Type.Object({
+export const scanResultSchema = Type.Object({
   version: Type.Literal(1),
   status: Type.Union([Type.Literal("complete"), Type.Literal("partial"), Type.Literal("preview"), Type.Literal("failed")]),
   model: Type.Object({ provider: Type.Literal("typesafe"), id: Type.Literal("jev-latest") }, objectOptions),
@@ -115,7 +115,7 @@ export const fileClassificationOutputSchema = Type.Object({
     pricing: Type.Union([Type.Literal("catalog"), Type.Literal("unknown")]),
     usage: Type.Object({ input: count, output: count, totalTokens: count, costUsd: Type.Union([Type.Number({ minimum: 0 }), Type.Null()]) }, objectOptions),
   }, objectOptions),
-  files: Type.Array(fileOutcomeSchema, { maxItems: 200 }),
+  files: Type.Array(fileResultSchema, { maxItems: 200 }),
   error: Type.Optional(Type.Object({
     tag: Type.Union([
       Type.Literal("InvalidRequest"), Type.Literal("ConsentRequired"), Type.Literal("ModelUnavailable"),
@@ -127,26 +127,26 @@ export const fileClassificationOutputSchema = Type.Object({
 }, objectOptions);
 
 /** A source-free scan result with explicit coverage accounting. */
-export type FileClassificationOutput = Static<typeof fileClassificationOutputSchema>;
+export type ScanResult = Static<typeof scanResultSchema>;
 
 /** One whole-file outcome; failed and skipped files never receive fabricated answers. */
-export type FileClassificationOutcome = FileClassificationOutput["files"][number];
+export type FileResult = ScanResult["files"][number];
 
 /** Stable scan-level failures, translated by the Pi tool entrypoint. */
-export type FileScanError = NonNullable<FileClassificationOutput["error"]>;
+export type ScanError = NonNullable<ScanResult["error"]>;
 
 const reservedKeys = new Set(["__proto__", "prototype", "constructor"]);
 
 /** Parse dynamic questions and selection without erasing their schema-established types. */
-export function parseFileClassificationInput(
+export function parseScanInput(
   // oxlint-disable-next-line anti-slop/no-unknown-parameters -- External input stays unknown until schema and semantic checks pass.
   value: unknown,
 ):
-  | { readonly status: "ok"; readonly input: FileClassificationInput }
-  | { readonly status: "error"; readonly error: FileScanError } {
+  | { readonly status: "ok"; readonly input: ScanInput }
+  | { readonly status: "error"; readonly error: ScanError } {
   const invalid = { status: "error", error: { tag: "InvalidRequest", message: "Jev files request is invalid. Use bounded relative paths and typed questions." } } as const;
 
-  if (!Check(fileClassificationInputSchema, value)) return invalid;
+  if (!Check(scanInputSchema, value)) return invalid;
 
   if (value.mode !== "preview") {
     if (Buffer.byteLength(JSON.stringify(value.questions)) > 16 * 1024) return invalid;

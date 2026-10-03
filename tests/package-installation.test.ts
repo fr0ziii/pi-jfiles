@@ -11,7 +11,7 @@ import {
   createAgentSession, createCodemodeExtension, DefaultResourceLoader, ModelRuntime,
   SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
-import { createTestProject, testRequest } from "./test-fixtures.ts";
+import { createTestProject, testScanInput } from "./test-fixtures.ts";
 
 const execute = promisify(execFile);
 
@@ -129,7 +129,7 @@ test("npm archive installs in isolated Pi and preserves one tool, local preview,
     if (matches.filter(tool => tool.name === "classify_files").length !== 1) throw new Error("Expected one tool");
     const preview = await tools.classify_files({ mode: "preview", selection: { kind: "paths", paths: ["src/example.ts"] } });
     if (preview.status !== "preview" || preview.summary.previewed !== 1 || preview.summary.requests !== 0) throw new Error("Invalid preview");
-    const refused = await tools.classify_files(${JSON.stringify(testRequest(["src/example.ts"]))});
+    const refused = await tools.classify_files(${JSON.stringify(testScanInput(["src/example.ts"]))});
     if (refused.error?.tag !== "ConsentRequired" || refused.summary.requests !== 0 || refused.summary.bytesSubmitted !== 0) throw new Error("Consent bypass");
     text({ previewed: preview.summary.previewed, consent: refused.error.tag, requests: refused.summary.requests });
   ` });

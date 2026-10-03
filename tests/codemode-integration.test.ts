@@ -11,7 +11,7 @@ import {
   createAgentSession, createCodemodeExtension, DefaultResourceLoader, ModelRuntime, SessionManager, SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import registerJevFiles from "../src/index.ts";
-import { createTestProject, testClassifierModel, testClassifierResponse, testRequest } from "./test-fixtures.ts";
+import { createTestProject, testClassifierModel, testClassifierResponse, testScanInput } from "./test-fixtures.ts";
 
 const wireQuestionSchema = Type.Union([
   Type.Object({ type: Type.Literal("noul"), instructions: Type.String(), criteria: Type.Object({ true: Type.String(), false: Type.String() }) }),
@@ -208,9 +208,9 @@ test("actual Pi codemode receives structured results, filters, stores, follows u
       { mode: "preview", selection, allowRemote: true }
     ];
     let refused = 0;
-    for (const request of invalid) {
+    for (const input of invalid) {
       try {
-        const result = await tools.classify_files(request);
+        const result = await tools.classify_files(input);
         if (result.status !== "failed" || result.error?.tag !== "InvalidRequest") throw new Error("Invalid input accepted");
         refused++;
       } catch (error) {
@@ -225,12 +225,12 @@ test("actual Pi codemode receives structured results, filters, stores, follows u
   assert.equal(classifierCalls, 0);
   observed.length = 0;
   resourceLoader.getExtensions().runtime.flagValues.set("jev-files-allow-remote", true);
-  const request = testRequest(["src/example.ts", "src/other.ts"]);
-  request.questions.layer = { type: "choice", instructions: "Which layer?", criteria: { domain: "Domain", adapter: "Adapter" } };
-  request.questions.risk = { type: "score", instructions: "Rate risk.", criteria: ["Low", "High"] };
+  const input = testScanInput(["src/example.ts", "src/other.ts"]);
+  input.questions.layer = { type: "choice", instructions: "Which layer?", criteria: { domain: "Domain", adapter: "Adapter" } };
+  input.questions.risk = { type: "score", instructions: "Rate risk.", criteria: ["Low", "High"] };
 
   const first = await codemode.execute("scan-integration", { code: `
-    const scan = await tools.classify_files(${JSON.stringify(request)});
+    const scan = await tools.classify_files(${JSON.stringify(input)});
     if (typeof scan !== "object" || !scan.files) throw new Error("Expected structuredContent");
     const hits = scan.files.filter(file => file.status === "classified" && file.answers.relevant.probability > 0.8)
       .sort((left, right) => right.answers.relevant.probability - left.answers.relevant.probability);
@@ -249,7 +249,7 @@ test("actual Pi codemode receives structured results, filters, stores, follows u
     if (!Array.isArray(paths) || paths.length !== 2) throw new Error("Store not restored");
     const scan = await tools.classify_files({
       selection: {kind:"paths",paths:[paths[0]]},
-      questions: ${JSON.stringify(request.questions)}
+      questions: ${JSON.stringify(input.questions)}
     });
     text({status:scan.status,classified:scan.summary.classified});
   ` });
@@ -266,7 +266,7 @@ test("actual Pi codemode receives structured results, filters, stores, follows u
   resourceLoader.getExtensions().runtime.flagValues.set("jev-files-allow-remote", false);
 
   const refusal = await codemode.execute("consent-integration", { code: `
-    const scan = await tools.classify_files(${JSON.stringify(request)});
+    const scan = await tools.classify_files(${JSON.stringify(input)});
     text(scan.error.tag);
   ` });
 

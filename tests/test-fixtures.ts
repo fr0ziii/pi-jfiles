@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ClassifierContext, ClassifierModel, ClassifierResult } from "@earendil-works/pi-ai";
 import { Check } from "typebox/value";
-import { fileClassificationOutputSchema, type FileClassificationRequest, type FileClassificationOutput } from "../src/file-classification-contract.ts";
+import { scanResultSchema, type ClassifyInput, type ScanResult } from "../src/file-classification-contract.ts";
 import type { FileClassifierRuntime } from "../src/file-classification.ts";
 
 /** Temporary project fixture; every file is synthetic and is removed after the test. */
@@ -28,8 +28,8 @@ export const testClassifierModel: ClassifierModel<"typesafe-system-one"> = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 };
 
-/** A dynamic request shared only by tests. */
-export function testRequest(paths = ["src/example.ts"]): FileClassificationRequest {
+/** Dynamic classification input shared only by tests. */
+export function testScanInput(paths = ["src/example.ts"]): ClassifyInput {
   return {
     selection: { kind: "paths", paths },
     questions: { relevant: { type: "bool", instructions: "Does the source calculate prorated charges?",
@@ -69,8 +69,8 @@ export function testRuntime(overrides: Partial<FileClassifierRuntime> = {}): Fil
 }
 
 /** Assert the actual schema and the coverage invariant at the returned tool boundary. */
-export function hasValidCoverage(result: FileClassificationOutput): boolean {
-  return Check(fileClassificationOutputSchema, result) &&
+export function hasValidCoverage(result: ScanResult): boolean {
+  return Check(scanResultSchema, result) &&
     result.summary.selected === result.files.length &&
     result.summary.selected === result.summary.classified + result.summary.previewed +
       result.summary.skipped + result.summary.failed + result.summary.unprocessed;

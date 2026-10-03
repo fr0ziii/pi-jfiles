@@ -7,9 +7,9 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { readSelectedSource, selectSourceFiles } from "../src/file-selection.ts";
+import { readSelectedFile, selectFiles } from "../src/file-selection.ts";
 import { createFileClassifier } from "../src/file-classification.ts";
-import { createTestProject, hasValidCoverage, testRequest, testRuntime } from "./test-fixtures.ts";
+import { createTestProject, hasValidCoverage, testScanInput, testRuntime } from "./test-fixtures.ts";
 
 const execute = promisify(execFile);
 
@@ -130,7 +130,7 @@ test("token, OAuth, and session implementation paths stay eligible, while creden
 
   const submitted: string[] = [];
 
-  const scan = await Effect.runPromise(runner.run(root, testRequest([...allowed, ...denied]), testRuntime({
+  const scan = await Effect.runPromise(runner.run(root, testScanInput([...allowed, ...denied]), testRuntime({
     classify: async (_model, context) => {
       submitted.push(String(context.state.path));
 
@@ -172,7 +172,7 @@ test("exact paths cannot read ignored source, dependencies, or common credential
   const paths = ["ignored.ts", "src/example.ts", ".env", "auth.json", "key.pem", "node_modules/a.ts", "config/secrets.json", "missing.ts"];
   const submitted: string[] = [];
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(paths), testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(paths), testRuntime({
     classify: async (_model, context) => {
       submitted.push(String(context.state.path));
 
@@ -192,7 +192,7 @@ test("symlink files and parents never submit external source", async t => {
   await symlink(join(external, "secret.ts"), join(root, "link.ts"));
   await symlink(external, join(root, "linked"));
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(["link.ts", "linked/secret.ts"]), testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(["link.ts", "linked/secret.ts"]), testRuntime({
     classify: async () => { throw new Error("Must not upload symlink targets"); },
   })));
 
@@ -204,10 +204,10 @@ test("symlink files and parents never submit external source", async t => {
 test("a snapshot from a different project cannot cross the read root", async t => {
   const root = await createTestProject(t, { "src/example.ts": "local" });
   const external = await createTestProject(t, { "src/example.ts": "external" });
-  const selection = await Effect.runPromise(selectSourceFiles(external, testRequest().selection));
+  const selection = await Effect.runPromise(selectFiles(external, testScanInput().selection));
   const file = selection.candidates[0];
   assert.ok(file);
-  const source = await Effect.runPromise(Effect.result(readSelectedSource(root, file)));
+  const source = await Effect.runPromise(Effect.result(readSelectedFile(root, file)));
   assert.ok(Result.isFailure(source));
   assert.equal(source.failure.reason, "file-changed");
 });
@@ -218,7 +218,7 @@ test("skips oversized, binary, and invalid UTF-8 files without truncation", asyn
     "invalid.ts": Buffer.from([0xc3, 0x28]), "empty.ts": "",
   });
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(["large.ts", "binary.ts", "invalid.ts", "empty.ts"]), testRuntime()));
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(["large.ts", "binary.ts", "invalid.ts", "empty.ts"]), testRuntime()));
   assert.equal(scan.result.summary.requests, 1);
   assert.equal(scan.result.summary.classified, 1);
   assert.equal(scan.result.summary.skipped, 3);
@@ -227,17 +227,17 @@ test("skips oversized, binary, and invalid UTF-8 files without truncation", asyn
 
 test("detects mutation and symlink replacement after preflight", async t => {
   const root = await createTestProject(t, { "src/example.ts": "original" });
-  const input = testRequest();
-  const selection = await Effect.runPromise(selectSourceFiles(root, input.selection));
+  const input = testScanInput();
+  const selection = await Effect.runPromise(selectFiles(root, input.selection));
   const file = selection.candidates[0];
   assert.ok(file);
   await writeFile(join(root, file.path), "changed");
-  const changed = await Effect.runPromise(Effect.result(readSelectedSource(selection.root, file)));
+  const changed = await Effect.runPromise(Effect.result(readSelectedFile(selection.root, file)));
   assert.ok(Result.isFailure(changed));
   assert.equal(changed.failure.reason, "file-changed");
   await rename(join(root, file.path), join(root, "original.ts"));
   await symlink(join(root, "original.ts"), join(root, file.path));
-  const replacement = await Effect.runPromise(Effect.result(readSelectedSource(selection.root, file)));
+  const replacement = await Effect.runPromise(Effect.result(readSelectedFile(selection.root, file)));
   assert.ok(Result.isFailure(replacement));
   assert.ok(["file-changed", "unreadable"].includes(replacement.failure.reason));
 });
@@ -248,7 +248,7 @@ test("preserves Unicode paths, literal glob characters, and UTF-8 BOM source", a
   const root = await createTestProject(t, Object.fromEntries(paths.map(path => [path, source])));
   const submitted: string[] = [];
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(paths), testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(paths), testRuntime({
     classify: async (_model, context) => {
       assert.equal(context.state.content, source);
       submitted.push(String(context.state.path));
@@ -274,7 +274,7 @@ test("empty glob matches have complete zero coverage without classifier calls", 
   const root = await createTestProject(t, { "src/example.ts": "example" });
 
   const scan = await Effect.runPromise(createFileClassifier().run(root, {
-    ...testRequest(), selection: { kind: "globs", include: ["nothing/**/*.ts"] },
+    ...testScanInput(), selection: { kind: "globs", include: ["nothing/**/*.ts"] },
   }, testRuntime({ classify: async () => { throw new Error("No files to submit"); } })));
 
   assert.equal(scan.result.status, "complete");
@@ -299,7 +299,7 @@ test("discovery rejects invalid UTF-8 paths before upload", async t => {
   }
 
   const scan = await Effect.runPromise(createFileClassifier().run(root, {
-    ...testRequest(), selection: { kind: "globs", include: ["**/*.ts"] },
+    ...testScanInput(), selection: { kind: "globs", include: ["**/*.ts"] },
   }, testRuntime({ classify: async () => { throw new Error("Invalid discovery must not upload"); } })));
 
   assert.equal(scan.result.error?.tag, "DiscoveryFailed");
@@ -316,11 +316,11 @@ test("rejects file and aggregate budgets before any upload", async t => {
   const runner = createFileClassifier();
 
   const files = await Effect.runPromise(runner.run(root, {
-    ...testRequest(), selection: { kind: "globs", include: ["*.ts"] },
+    ...testScanInput(), selection: { kind: "globs", include: ["*.ts"] },
   }, runtime));
 
   assert.equal(files.result.error?.tag, "ScanLimit");
-  const bytes = await Effect.runPromise(runner.run(root, testRequest(Array.from({ length: 90 }, (_, index) => "f" + index + ".ts")), runtime));
+  const bytes = await Effect.runPromise(runner.run(root, testScanInput(Array.from({ length: 90 }, (_, index) => "f" + index + ".ts")), runtime));
   assert.equal(bytes.result.error?.tag, "ScanLimit");
   assert.equal(bytes.result.summary.requests, 0);
 });

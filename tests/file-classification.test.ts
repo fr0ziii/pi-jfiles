@@ -3,17 +3,17 @@ import { Clock, Deferred, Effect, Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { test } from "node:test";
 import type { ClassifierResult, Usage } from "@earendil-works/pi-ai";
-import type { FileClassificationInput } from "../src/file-classification-contract.ts";
+import type { ScanInput } from "../src/file-classification-contract.ts";
 import { createFileClassifier, type FileClassifierRun } from "../src/file-classification.ts";
-import { createTestProject, hasValidCoverage, testClassifierModel, testClassifierResponse, testRequest, testRuntime } from "./test-fixtures.ts";
+import { createTestProject, hasValidCoverage, testClassifierModel, testClassifierResponse, testScanInput, testRuntime } from "./test-fixtures.ts";
 
 test("deduplicates exact paths and submits whole source without retries", async t => {
   const source = "SOURCE_ONLY_IN_CLASSIFIER: calculateProratedCharge()";
   const root = await createTestProject(t, { "src/example.ts": source, "src/other.ts": "other" });
-  const request = testRequest(["src/example.ts", "src/other.ts", "src/example.ts"]);
-  request.questions.layer = { type: "choice", instructions: "Which layer?",
+  const input = testScanInput(["src/example.ts", "src/other.ts", "src/example.ts"]);
+  input.questions.layer = { type: "choice", instructions: "Which layer?",
     criteria: { domain: "Domain behavior", adapter: "Runtime dependency" } };
-  request.questions.risk = { type: "score", instructions: "Rate isolation.", criteria: ["Coupled", "Mixed", "Isolated"] };
+  input.questions.risk = { type: "score", instructions: "Rate isolation.", criteria: ["Coupled", "Mixed", "Isolated"] };
   let calls = 0;
 
   const runtime = testRuntime({ classify: async (_model, context, options) => {
@@ -28,7 +28,7 @@ test("deduplicates exact paths and submits whole source without retries", async 
   } });
 
   const runner = createFileClassifier();
-  const scan = await Effect.runPromise(runner.run(root, request, runtime));
+  const scan = await Effect.runPromise(runner.run(root, input, runtime));
   assert.equal(calls, 2);
   assert.equal(scan.result.status, "complete");
   assert.equal(JSON.stringify(scan).includes(source), false);
@@ -39,7 +39,7 @@ test("deduplicates exact paths and submits whole source without retries", async 
   assert.equal(first.digest.length, 64);
 });
 
-test("schema-shaped invalid requests fail before discovery or provider access", async () => {
+test("schema-shaped invalid inputs fail before discovery or provider access", async () => {
   const runner = createFileClassifier();
 
   const runtime = testRuntime({
@@ -47,21 +47,21 @@ test("schema-shaped invalid requests fail before discovery or provider access", 
     classify: async () => { throw new Error("Invalid input must not submit source"); },
   });
 
-  // TypeScript checks the request shape, not portable paths, strict objects, keys, or byte limits.
+  // TypeScript checks the scan input shape, not portable paths, strict objects, keys, or byte limits.
   const extraPreview = { mode: "preview" as const, selection: { kind: "paths" as const, paths: ["a.ts"] }, questions: {} };
-  const reservedKey = testRequest();
+  const reservedKey = testScanInput();
   const question = reservedKey.questions.relevant;
 
   assert.ok(question);
   reservedKey.questions = { constructor: question };
 
-  const largeQuestions = testRequest();
+  const largeQuestions = testScanInput();
   largeQuestions.questions.large = {
     type: "choice", instructions: "Classify",
     criteria: Object.fromEntries(Array.from({ length: 20 }, (_, index) => ["label" + index, "x".repeat(1000)])),
   };
 
-  const invalid: FileClassificationInput[] = [testRequest(["../outside.ts"]), extraPreview, reservedKey, largeQuestions];
+  const invalid: ScanInput[] = [testScanInput(["../outside.ts"]), extraPreview, reservedKey, largeQuestions];
 
   for (const input of invalid) {
     // A nonexistent root makes accidental discovery observable without filesystem fixtures.
@@ -80,8 +80,8 @@ test("classifier input and complete Effect result stay schema-derived", () => {
   const runner = createFileClassifier();
   const runtime = testRuntime();
   const preview = runner.run(".", { mode: "preview", selection: { kind: "paths", paths: ["a.ts"] } }, runtime);
-  const classification = runner.run(".", testRequest(), runtime);
-  const explicit = runner.run(".", { ...testRequest(), mode: "classify" }, runtime);
+  const classification = runner.run(".", testScanInput(), runtime);
+  const explicit = runner.run(".", { ...testScanInput(), mode: "classify" }, runtime);
   const inferred: Effect.Effect<FileClassifierRun, never, never> = classification;
   const unparsed: unknown = JSON.parse("{}");
 
@@ -97,32 +97,32 @@ test("classifier input and complete Effect result stay schema-derived", () => {
   // @ts-expect-error Callers cannot pass unknown input without parsing it.
   runner.run(".", unparsed, runtime);
   // @ts-expect-error The runner does not accept additional library parse options.
-  runner.run(".", testRequest(), runtime, undefined, {});
+  runner.run(".", testScanInput(), runtime, undefined, {});
 });
 
 test("remote consent, unavailable models, and missing credentials fail before source submission", async t => {
   const root = await createTestProject(t, { "src/example.ts": "NEVER_UPLOAD" });
   const runner = createFileClassifier();
 
-  const consent = await Effect.runPromise(runner.run(root, testRequest(), testRuntime({
+  const consent = await Effect.runPromise(runner.run(root, testScanInput(), testRuntime({
     allowRemote: false, resolveModel: async () => { throw new Error("Must not resolve without consent"); },
   })));
 
   assert.equal(consent.result.error?.tag, "ConsentRequired");
 
-  const unavailable = await Effect.runPromise(runner.run(root, testRequest(), testRuntime({
+  const unavailable = await Effect.runPromise(runner.run(root, testScanInput(), testRuntime({
     resolveModel: async () => ({ status: "error", error: { tag: "ModelUnavailable", message: "No model" } }),
   })));
 
   assert.equal(unavailable.result.error?.tag, "ModelUnavailable");
 
-  const credentials = await Effect.runPromise(runner.run(root, testRequest(), testRuntime({
+  const credentials = await Effect.runPromise(runner.run(root, testScanInput(), testRuntime({
     resolveModel: async () => ({ status: "error", error: { tag: "CredentialsRequired", message: "No credentials" } }),
   })));
 
   assert.equal(credentials.result.error?.tag, "CredentialsRequired");
 
-  const fallback = await Effect.runPromise(runner.run(root, testRequest(), testRuntime({
+  const fallback = await Effect.runPromise(runner.run(root, testScanInput(), testRuntime({
     resolveModel: async () => ({ status: "ok", model: { ...testClassifierModel, provider: "openrouter" } }),
   })));
 
@@ -151,7 +151,7 @@ test("honestly reports provider errors, throws, and invalid answers without erro
   ];
 
   for (const mutate of mutations) {
-    const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(), testRuntime({
+    const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(), testRuntime({
       classify: async (_model, context) => mutate(testClassifierResponse(context)),
     })));
 
@@ -166,7 +166,7 @@ test("honestly reports provider errors, throws, and invalid answers without erro
 test("provider aborts are explicit cancelled outcomes, not fabricated answers", async t => {
   const root = await createTestProject(t, { "src/example.ts": "example" });
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(), testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(), testRuntime({
     classify: async (_model, context) => ({ ...testClassifierResponse(context), stopReason: "aborted" }),
   })));
 
@@ -177,9 +177,9 @@ test("provider aborts are explicit cancelled outcomes, not fabricated answers", 
 
 test("rejects unknown choice labels, incomplete probabilities, and scores outside caller criteria", async t => {
   const root = await createTestProject(t, { "src/example.ts": "example" });
-  const request = testRequest();
-  request.questions.layer = { type: "choice", instructions: "Which layer?", criteria: { domain: "Domain", adapter: "Adapter" } };
-  request.questions.risk = { type: "score", instructions: "Rate risk.", criteria: ["Low", "High"] };
+  const input = testScanInput();
+  input.questions.layer = { type: "choice", instructions: "Which layer?", criteria: { domain: "Domain", adapter: "Adapter" } };
+  input.questions.risk = { type: "score", instructions: "Rate risk.", criteria: ["Low", "High"] };
 
   for (const answers of [
     { layer: { type: "choice", choice: "unknown", probabilities: { domain: 1, adapter: 0 }, confidence: 1 } },
@@ -187,7 +187,7 @@ test("rejects unknown choice labels, incomplete probabilities, and scores outsid
     { layer: { type: "choice", choice: "domain", probabilities: { domain: 1, adapter: 1 }, confidence: 1 } },
     { risk: { type: "score", score: 2, confidence: 1 } },
   ] satisfies Partial<ClassifierResult["answers"]>[]) {
-    const scan = await Effect.runPromise(createFileClassifier().run(root, request, testRuntime({
+    const scan = await Effect.runPromise(createFileClassifier().run(root, input, testRuntime({
       classify: async (_model, context) => {
         const response = testClassifierResponse(context);
 
@@ -202,10 +202,10 @@ test("rejects unknown choice labels, incomplete probabilities, and scores outsid
 
 test("finite fractional scores remain valid within caller criteria", async t => {
   const root = await createTestProject(t, { "src/example.ts": "example" });
-  const request = testRequest();
-  request.questions.risk = { type: "score", instructions: "Rate risk.", criteria: ["Low", "High"] };
+  const input = testScanInput();
+  input.questions.risk = { type: "score", instructions: "Rate risk.", criteria: ["Low", "High"] };
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, request, testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, input, testRuntime({
     classify: async (_model, context) => ({ ...testClassifierResponse(context),
       answers: { relevant: { type: "bool", probability: 0 }, risk: { type: "score", score: 0.5, confidence: 1 } } }),
   })));
@@ -216,7 +216,7 @@ test("finite fractional scores remain valid within caller criteria", async t => 
 
 test("skips estimated context overflow without truncating source or questions", async t => {
   const root = await createTestProject(t, { "src/example.ts": "x".repeat(63_000) });
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(), testRuntime()));
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(), testRuntime()));
   assert.equal(scan.result.files[0]?.status, "skipped");
   assert.equal(scan.result.summary.requests, 0);
   assert.ok(hasValidCoverage(scan.result));
@@ -230,7 +230,7 @@ const reportedUsage: Usage = {
 test("aggregates reported usage, including billed errors; unknown catalog pricing is not free", async t => {
   const root = await createTestProject(t, { "a.ts": "a", "b.ts": "b", "c.ts": "c" });
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(["a.ts", "b.ts", "c.ts"]), testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(["a.ts", "b.ts", "c.ts"]), testRuntime({
     classify: async (_model, context) => {
       const response = testClassifierResponse(context);
 
@@ -265,7 +265,7 @@ test("reported zero usage differs from missing or invalid usage, and catalog cos
   for (const usage of [zero, undefined, { ...zero, input: -1 }, { ...zero, output: 0.5 },
     { ...zero, cacheRead: 0.5 }, { ...zero, cacheWrite: Number.NaN },
     { ...zero, cost: { ...zero.cost, total: Number.POSITIVE_INFINITY } }]) {
-    const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(), testRuntime({
+    const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(), testRuntime({
       classify: async (_model, context) => {
         const response = testClassifierResponse(context);
 
@@ -285,7 +285,7 @@ test("reported zero usage differs from missing or invalid usage, and catalog cos
     assert.ok(hasValidCoverage(scan.result));
   }
 
-  const priced = await Effect.runPromise(createFileClassifier().run(root, testRequest(), testRuntime({
+  const priced = await Effect.runPromise(createFileClassifier().run(root, testScanInput(), testRuntime({
     resolveModel: async () => ({ status: "ok", model: { ...testClassifierModel,
       cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 } } }),
     classify: async (_model, context) => ({ ...testClassifierResponse(context), usage: reportedUsage }),
@@ -309,13 +309,13 @@ test("held permits become available only when cancelled provider promises settle
   }) });
 
   const runner = createFileClassifier();
-  const cancelled = await Effect.runPromise(runner.run(root, testRequest(paths), runtime, controller.signal));
+  const cancelled = await Effect.runPromise(runner.run(root, testScanInput(paths), runtime, controller.signal));
   assert.equal(cancelled.result.error?.tag, "Cancelled");
   assert.equal(cancelled.result.summary.requests, 4);
   assert.ok(hasValidCoverage(cancelled.result));
 
   for (const request of pending) request.resolve(testClassifierResponse(request.context));
-  const followup = await Effect.runPromise(runner.run(root, testRequest(paths), testRuntime()));
+  const followup = await Effect.runPromise(runner.run(root, testScanInput(paths), testRuntime()));
   assert.equal(followup.result.summary.classified, paths.length);
   assert.ok(hasValidCoverage(followup.result));
 });
@@ -343,8 +343,8 @@ test("shares a four-request concurrency budget across concurrent scans", async t
   const runner = createFileClassifier();
 
   const scans = Promise.all([
-    Effect.runPromise(runner.run(root, testRequest(paths), runtime)),
-    Effect.runPromise(runner.run(root, testRequest(paths), runtime)),
+    Effect.runPromise(runner.run(root, testScanInput(paths), runtime)),
+    Effect.runPromise(runner.run(root, testScanInput(paths), runtime)),
   ]);
 
   await Effect.runPromise(Deferred.await(ready));
@@ -390,16 +390,16 @@ test("rejects a third active scan and accounts for all files on cancellation", a
     const runner = createFileClassifier({ scanDeadlineMs: 1000, requestDeadlineMs: 1000 });
     const controller = new AbortController();
 
-    const first = yield* runner.run(root, testRequest(paths), runtime, controller.signal).pipe(
+    const first = yield* runner.run(root, testScanInput(paths), runtime, controller.signal).pipe(
       Effect.provideService(Clock.Clock, clock), Effect.forkChild,
     );
 
-    const second = yield* runner.run(root, testRequest(paths), runtime, controller.signal).pipe(
+    const second = yield* runner.run(root, testScanInput(paths), runtime, controller.signal).pipe(
       Effect.provideService(Clock.Clock, clock), Effect.forkChild,
     );
 
     yield* Deferred.await(admitted);
-    const third = yield* runner.run(root, testRequest(paths), runtime);
+    const third = yield* runner.run(root, testScanInput(paths), runtime);
     assert.equal(third.result.error?.tag, "ScanBusy");
     yield* Deferred.await(ready);
     controller.abort();
@@ -413,7 +413,7 @@ test("rejects a third active scan and accounts for all files on cancellation", a
     assert.equal(started, 4);
 
     // An ignored abort cannot free a permit and start more provider requests.
-    const retained = yield* runner.run(root, testRequest(paths), runtime).pipe(
+    const retained = yield* runner.run(root, testScanInput(paths), runtime).pipe(
       Effect.provideService(Clock.Clock, clock), Effect.forkChild,
     );
 
@@ -434,7 +434,7 @@ test("request deadlines finish even if the provider ignores AbortSignal", async 
     let requestSignal: AbortSignal | undefined;
 
     const fiber = yield* createFileClassifier({ scanDeadlineMs: 1000, requestDeadlineMs: 20 }).run(
-      root, testRequest(), testRuntime({
+      root, testScanInput(), testRuntime({
         classify: async (_model, _context, options) => {
           requestSignal = options.signal;
           Effect.runSync(Deferred.succeed(ready, undefined));
@@ -474,7 +474,7 @@ test("scan deadlines abort requests and account for queued files", async t => {
 
     const runner = createFileClassifier({ scanDeadlineMs: 20, requestDeadlineMs: 1000 });
 
-    const fiber = yield* runner.run(root, testRequest(paths), runtime).pipe(
+    const fiber = yield* runner.run(root, testScanInput(paths), runtime).pipe(
       Effect.provideService(Clock.Clock, clock), Effect.forkChild,
     );
 
@@ -490,7 +490,7 @@ test("scan deadlines abort requests and account for queued files", async t => {
     const snapshot = JSON.stringify(scan);
 
     for (const request of pending) request.resolve(testClassifierResponse(request.context));
-    const followup = yield* runner.run(root, testRequest(paths), testRuntime()).pipe(Effect.provideService(Clock.Clock, clock));
+    const followup = yield* runner.run(root, testScanInput(paths), testRuntime()).pipe(Effect.provideService(Clock.Clock, clock));
     assert.equal(followup.result.summary.classified, paths.length);
     assert.equal(followup.result.summary.elapsedMs, 0);
     assert.equal(JSON.stringify(scan), snapshot);
@@ -504,7 +504,7 @@ test("cancellation interrupts model resolution without submitting source", async
   const model = Promise.withResolvers<Awaited<ReturnType<ReturnType<typeof testRuntime>["resolveModel"]>>>();
   const runner = createFileClassifier();
 
-  const pending = Effect.runPromise(runner.run(root, testRequest(), testRuntime({
+  const pending = Effect.runPromise(runner.run(root, testScanInput(), testRuntime({
     resolveModel: () => {
       Effect.runSync(Deferred.succeed(resolving, undefined));
 
@@ -517,7 +517,7 @@ test("cancellation interrupts model resolution without submitting source", async
   const cancelled = await pending;
   assert.equal(cancelled.result.error?.tag, "Cancelled");
   assert.equal(cancelled.result.summary.requests, 0);
-  const followup = await Effect.runPromise(runner.run(root, testRequest(), testRuntime()));
+  const followup = await Effect.runPromise(runner.run(root, testScanInput(), testRuntime()));
   assert.equal(followup.result.summary.classified, 1);
   model.resolve({ status: "error", error: { tag: "ModelUnavailable", message: "Late synthetic result" } });
 });
@@ -530,7 +530,7 @@ test("Effect interruption preserves cancellation and releases permits on late se
     const pending: { signal: AbortSignal | undefined; context: Parameters<typeof testClassifierResponse>[0]; completion: ReturnType<typeof Promise.withResolvers<ClassifierResult>> }[] = [];
     const runner = createFileClassifier();
 
-    const fiber = yield* runner.run(root, testRequest(paths), testRuntime({
+    const fiber = yield* runner.run(root, testScanInput(paths), testRuntime({
       classify: (_model, context, options) => {
         const completion = Promise.withResolvers<ClassifierResult>();
         pending.push({ signal: options.signal, context, completion });
@@ -558,7 +558,7 @@ test("Effect interruption preserves cancellation and releases permits on late se
       else request.completion.resolve(testClassifierResponse(request.context));
     }
 
-    const followup = yield* runner.run(root, testRequest(paths), testRuntime());
+    const followup = yield* runner.run(root, testScanInput(paths), testRuntime());
     assert.equal(followup.result.summary.classified, paths.length);
     assert.ok(hasValidCoverage(followup.result));
   })));
@@ -573,7 +573,7 @@ test("non-submitted files release their permits for queued files", async t => {
   });
 
   const scan = await Effect.runPromise(createFileClassifier().run(
-    root, testRequest([...binaryPaths, "src/example.ts"]), testRuntime(),
+    root, testScanInput([...binaryPaths, "src/example.ts"]), testRuntime(),
   ));
 
   assert.equal(scan.result.summary.skipped, binaryPaths.length);
@@ -589,7 +589,7 @@ test("scan duration uses the Effect clock", async t => {
     const clock = yield* TestClock.make();
     yield* clock.setTime(100);
 
-    return yield* createFileClassifier().run(root, testRequest(), testRuntime({
+    return yield* createFileClassifier().run(root, testScanInput(), testRuntime({
       classify: async (_model, context) => {
         await Effect.runPromise(clock.adjust(25));
 
@@ -606,7 +606,7 @@ test("pre-aborted calls do not submit source or resolve credentials", async t =>
   const root = await createTestProject(t, { "src/example.ts": "example" });
   const signal = AbortSignal.abort();
 
-  const scan = await Effect.runPromise(createFileClassifier().run(root, testRequest(), testRuntime({
+  const scan = await Effect.runPromise(createFileClassifier().run(root, testScanInput(), testRuntime({
     resolveModel: async () => { throw new Error("Already cancelled"); },
   }), signal));
 

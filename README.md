@@ -40,7 +40,7 @@ pi --jev-files-allow-remote --tools read,bash,edit,write,codemode
 **This flag permits remote source submission for the process.** Each request
 sends the relative path, whole file content, and all questions to TypeSafe
 through Pi. Review the selected paths before classification. Embedded secrets
-can exist in ordinary source files; filename exclusions are not secret detection.
+can exist in ordinary project files; filename exclusions are not secret detection.
 Source consumes classifier context and can incur cost. Pi owns the transport and
 credentials. Review any local TypeSafe provider overrides before use.
 
@@ -102,7 +102,7 @@ pass selection only. There is no separate preview tool or consent argument.
 Preview is not a frozen source snapshot. Classification repeats selection and
 read checks. If the process or branch changed, check stored values or repeat the
 preview. Do not rely on unverified in-memory state. Check coverage before you
-interpret findings. A follow-up can use exact paths and different questions:
+interpret classifications. A follow-up can use exact paths and different questions:
 
 ```js
 const scan = load("billingScan");
@@ -267,7 +267,7 @@ Usage availability is `complete`, `partial`, or `none`. Valid reported usage inc
 error responses and reaches Pi session totals once. Zero catalog prices are
 reported as unknown, not as free service.
 
-Results contain no source, but paths and findings can still be sensitive.
+Results contain no source, but paths and classifications can still be sensitive.
 Codemode storage and Pi session records follow Pi's own retention rules.
 
 ## Development

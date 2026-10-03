@@ -2,24 +2,24 @@ import type { ClassifierApi, ClassifierContext, ClassifierModel, ClassifierOptio
 import { Check } from "typebox/value";
 import { Clock, Effect, Option, Semaphore } from "effect";
 import {
-  fileClassificationAnswersSchema, parseFileClassificationInput,
-  type FileClassificationInput, type FileClassificationRequest, type FileClassificationOutput, type FileClassificationOutcome, type FileScanError,
+  answersSchema, parseScanInput,
+  type ScanInput, type ClassifyInput, type ScanResult, type FileResult, type ScanError,
 } from "./file-classification-contract.ts";
-import { selectSourceFiles, readSelectedSource, type SourceSelection } from "./file-selection.ts";
+import { selectFiles, readSelectedFile, type SelectedFiles } from "./file-selection.ts";
 
 /** Runtime boundary for Pi authentication and classifier execution; source is never logged here. */
 export interface FileClassifierRuntime {
   readonly allowRemote: boolean;
   resolveModel(): Promise<
     | { readonly status: "ok"; readonly model: ClassifierModel<ClassifierApi> }
-    | { readonly status: "error"; readonly error: FileScanError }
+    | { readonly status: "error"; readonly error: ScanError }
   >;
   classify(model: ClassifierModel<ClassifierApi>, context: ClassifierContext, options: ClassifierOptions): Promise<ClassifierResult>;
 }
 
 /** One scan plus reported provider usage for Pi's nested tool accounting. */
 export interface FileClassifierRun {
-  readonly result: FileClassificationOutput;
+  readonly result: ScanResult;
   readonly usage?: Usage;
 }
 
@@ -34,7 +34,7 @@ const defaultPolicy: FileClassifierPolicy = { scanDeadlineMs: 120_000, requestDe
 /** One file classification operation; each instance owns its shared request and scan budgets. */
 export interface FileClassifier {
   /** Runtime validation rejects invalid paths, questions, and additional properties before I/O. */
-  run(cwd: string, value: FileClassificationInput, runtime: FileClassifierRuntime, callerSignal?: AbortSignal): Effect.Effect<FileClassifierRun>;
+  run(cwd: string, value: ScanInput, runtime: FileClassifierRuntime, callerSignal?: AbortSignal): Effect.Effect<FileClassifierRun>;
 }
 
 /** Create an extension-wide runner: at most two scans and four outstanding classifier requests. */
@@ -43,18 +43,18 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
   const scans = Semaphore.makeUnsafe(2);
 
   return {
-    run: Effect.fn("FileClassifier.run")(function*(cwd: string, value: FileClassificationInput, runtime: FileClassifierRuntime, callerSignal?: AbortSignal) {
+    run: Effect.fn("FileClassifier.run")(function*(cwd: string, value: ScanInput, runtime: FileClassifierRuntime, callerSignal?: AbortSignal) {
       const startedNanos = yield* Clock.monotonicTimeNanos;
       const result = createEmptyScan();
 
-      const fail = (error: FileScanError) => Effect.gen(function*() {
+      const fail = (error: ScanError) => Effect.gen(function*() {
         result.status = "failed"; result.error = error;
         result.summary.elapsedMs = Math.max(0, Number(((yield* Clock.monotonicTimeNanos) - startedNanos) / 1_000_000n));
 
         return { result };
       });
 
-      const parsed = parseFileClassificationInput(value);
+      const parsed = parseScanInput(value);
 
       if (parsed.status === "error") return yield* fail(parsed.error);
       const input = parsed.input;
@@ -65,11 +65,11 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
 
       const admitted = yield* scans.withPermitsIfAvailable(1)(Effect.gen(function*() {
         if (callerSignal?.aborted) return yield* fail({ tag: "Cancelled", message: "Jev files scan was cancelled." });
-        let selection: SourceSelection | undefined;
+        let selection: SelectedFiles | undefined;
         let aggregateUsage: Usage | undefined;
-        let scanError: FileScanError | undefined;
+        let scanError: ScanError | undefined;
 
-        const stop = (error: FileScanError) => Effect.suspend(() => {
+        const stop = (error: ScanError) => Effect.suspend(() => {
           scanError = error;
 
           return Effect.fail(error);
@@ -80,7 +80,7 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
         ));
 
         const cancellation = callerSignal
-          ? Effect.callback<never, FileScanError>(resume => {
+          ? Effect.callback<never, ScanError>(resume => {
               const abort = () => resume(stop({ tag: "Cancelled", message: "Jev files scan was cancelled." }));
               callerSignal.addEventListener("abort", abort, { once: true });
 
@@ -96,20 +96,20 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
           if (input.mode !== "preview") {
             const resolved = yield* Effect.tryPromise({
               try: () => runtime.resolveModel(),
-              catch: (): FileScanError => ({ tag: "ModelUnavailable", message: "Cannot resolve the TypeSafe classifier." }),
+              catch: (): ScanError => ({ tag: "ModelUnavailable", message: "Cannot resolve the TypeSafe classifier." }),
             });
 
             if (resolved.status === "error") return yield* Effect.fail(resolved.error);
             model = resolved.model;
 
             if (model.provider !== "typesafe" || model.id !== "jev-latest" || model.api !== "typesafe-system-one") {
-              return yield* Effect.fail<FileScanError>({ tag: "ModelUnavailable", message: "Jev files requires typesafe/jev-latest with the TypeSafe classifier API." });
+              return yield* Effect.fail<ScanError>({ tag: "ModelUnavailable", message: "Jev files requires typesafe/jev-latest with the TypeSafe classifier API." });
             }
 
             result.summary.pricing = model.cost.input > 0 || model.cost.output > 0 ? "catalog" : "unknown";
           }
 
-          const selected = yield* selectSourceFiles(cwd, input.selection);
+          const selected = yield* selectFiles(cwd, input.selection);
           selection = selected;
           result.summary.discovered = selected.discovered;
           result.summary.selected = selected.selected;
@@ -129,7 +129,7 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
                 let handedToProvider = false;
 
                 return yield* restore(Effect.gen(function*() {
-                  const source = yield* readSelectedSource(selected.root, file);
+                  const source = yield* readSelectedFile(selected.root, file);
 
                   const context: ClassifierContext = {
                     state: { path: file.path, content: source.content, sourceKind: "untrusted-project-file" },
@@ -138,10 +138,10 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
 
                   // Conservative byte estimate, not a claim of exact tokenization.
                   if (Buffer.byteLength(JSON.stringify(context)) + 2048 > selectedModel.contextWindow) {
-                    return yield* Effect.fail<FileClassificationOutcome>({ status: "skipped", path: file.path, reason: "context-limit" });
+                    return yield* Effect.fail<FileResult>({ status: "skipped", path: file.path, reason: "context-limit" });
                   }
 
-                  const response = yield* Effect.callback<ClassifierResult, FileClassificationOutcome>((resume, signal) => {
+                  const response = yield* Effect.callback<ClassifierResult, FileResult>((resume, signal) => {
                     result.summary.requests++;
                     result.summary.bytesSubmitted += source.bytes;
                     submitted = true;
@@ -162,7 +162,7 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
                       );
                     }).pipe(Effect.timeoutOrElse({
                       duration: policy.requestDeadlineMs,
-                      orElse: () => Effect.fail<FileClassificationOutcome>({ status: "failed", path: file.path, reason: "deadline" }),
+                      orElse: () => Effect.fail<FileResult>({ status: "failed", path: file.path, reason: "deadline" }),
                     }));
 
                     if (response.usage && isValidUsage(response.usage)) {
@@ -170,12 +170,12 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
                       result.summary.usageReports++;
                     }
 
-                    if (response.stopReason !== "stop") return yield* Effect.fail<FileClassificationOutcome>({
+                    if (response.stopReason !== "stop") return yield* Effect.fail<FileResult>({
                       status: "failed", path: file.path, reason: response.stopReason === "aborted" ? "cancelled" : "provider-error",
                     });
                     const answers = validateFileAnswers(response, input);
 
-                    if (!answers) return yield* Effect.fail<FileClassificationOutcome>({ status: "failed", path: file.path, reason: "invalid-answer" });
+                    if (!answers) return yield* Effect.fail<FileResult>({ status: "failed", path: file.path, reason: "invalid-answer" });
 
                     return { status: "classified", path: file.path, bytes: source.bytes, digest: source.digest, answers } as const;
                   })).pipe(Effect.ensuring(Effect.suspend(() => handedToProvider ? Effect.void : requests.release(1))));
@@ -231,7 +231,7 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
   };
 }
 
-function createEmptyScan(): FileClassificationOutput {
+function createEmptyScan(): ScanResult {
   return {
     version: 1, status: "complete", model: { provider: "typesafe", id: "jev-latest" },
     summary: { discovered: 0, selected: 0, classified: 0, previewed: 0, skipped: 0, failed: 0, unprocessed: 0,
@@ -241,7 +241,7 @@ function createEmptyScan(): FileClassificationOutput {
   };
 }
 
-function finalizeScan(result: FileClassificationOutput, elapsedMs: number): void {
+function finalizeScan(result: ScanResult, elapsedMs: number): void {
   result.files.sort((left, right) => left.path.localeCompare(right.path, "en"));
 
   for (const file of result.files) {
@@ -260,9 +260,9 @@ function finalizeScan(result: FileClassificationOutput, elapsedMs: number): void
   result.summary.elapsedMs = elapsedMs;
 }
 
-function validateFileAnswers(response: ClassifierResult, input: FileClassificationRequest):
-  Extract<FileClassificationOutcome, { status: "classified" }>["answers"] | undefined {
-  if (!Check(fileClassificationAnswersSchema, response.answers)) return undefined;
+function validateFileAnswers(response: ClassifierResult, input: ClassifyInput):
+  Extract<FileResult, { status: "classified" }>["answers"] | undefined {
+  if (!Check(answersSchema, response.answers)) return undefined;
 
   if (Object.keys(response.answers).length !== Object.keys(input.questions).length) return undefined;
 

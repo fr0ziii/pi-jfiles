@@ -8,6 +8,9 @@ This context describes how callers ask questions about project files and interpr
 A file in the project that a caller may ask about.
 _Avoid_: Source file
 
+**Scan**:
+One examination of selected project files, with per-file results and coverage. A scan can be a preview or a classification run.
+
 **Preview**:
 A metadata-only view of selected project files, used to review the scope before classification. It does not guarantee that later classification sees the same files or content.
 
