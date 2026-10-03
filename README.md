@@ -281,6 +281,8 @@ npm run check
 
 - [Architecture](docs/architecture.md): module ownership, contracts, request flow,
   resource lifecycle, and accounting.
+- [Cognitive model](docs/cognitive-model.md): decision process, attention,
+  information flow, memory, and a usability testing plan.
 - [Security](docs/security.md): consent, selection and read safeguards,
   disclosure limits, and known dependency risk.
 - [Development](docs/development.md): testing, lint tooling, package inspection,
