@@ -85,11 +85,10 @@ cannot guarantee that a later read sees the same file.
   cross-file correctness or complete test coverage.
 - Uploads can incur cost. Attempted requests and reported usage do not establish
   exact provider billing.
-- The pinned Pi development installation includes a shrinkwrapped
-  brace-expansion@5.0.9 high-severity denial-of-service advisory. Rejecting brace
-  globs does not patch Pi. Recheck audits and update Pi when a corrected release
-  is available. A clean runtime-only audit does not assess the separately
-  installed Pi host.
+- A separately installed Pi host can retain vulnerable dependencies. The pinned
+  Pi 1.0.1 development tree uses brace-expansion@5.0.12 instead of the affected
+  5.0.9 version. Rejecting brace globs does not patch a host installation. Audit
+  that host separately; neither project audit assesses it.
 
 ## Live validation
 

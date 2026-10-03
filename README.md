@@ -6,7 +6,7 @@ source text. Read selected files separately to inspect the evidence.
 
 ## Setup
 
-Requirements: Pi 0.99.1 or later, Node.js 24.8.0 or later, and ripgrep on PATH.
+Requirements: Pi 1.0.1 or later, Node.js 24.8.0 or later, and ripgrep on PATH.
 
 Install the npm package through Pi:
 

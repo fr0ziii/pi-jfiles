@@ -179,9 +179,9 @@ installation or live provider behavior.
 .github/workflows/ci.yml runs checks on pull requests and pushes to main.
 Both CI and release verification use Node.js 24, locked dependencies, and
 ripgrep on Ubuntu. They run lint, typechecking, tests, package inspection, and a
-blocking runtime dependency audit. The full audit is a separate non-blocking
-step because the pinned Pi development tree has a known advisory. Read its
-output; a successful workflow does not mean that the full audit passed.
+blocking runtime dependency audit. A separate full dependency audit also checks
+development dependencies and blocks both workflows on reported vulnerabilities.
+Read both audit outputs; passing tests do not establish dependency safety.
 
 .github/workflows/release.yml runs only when a GitHub Release is published.
 Pushing a tag or saving a draft does not publish to npm. Verification checks the
@@ -249,6 +249,35 @@ References: [GitHub Actions practices](https://github.com/github/awesome-copilot
 [pi-subagents workflows](https://github.com/nicobailon/pi-subagents/tree/main/.github/workflows),
 and [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/).
 
+## Dependency updates
+
+.github/dependabot.yml checks npm daily and groups available updates for
+@earendil-works/pi-* in one pull request. It updates the exact development pins
+and package-lock.json. The increase-if-necessary strategy preserves peer ranges
+when they already permit the new version. Peer requirements and README.md state
+the oldest supported Pi version, not necessarily the latest test version.
+
+Review each update before merging, including major releases. Keep both Pi
+development packages on compatible releases. There is no automatic merge rule.
+Require the CI check through GitHub branch protection or a repository ruleset;
+the Dependabot file alone does not enforce that requirement or human review.
+
+Check these failure modes when changing dependency automation:
+
+- YAML cannot be parsed or supported settings are missing.
+- Allow or group patterns miss a Pi package or include unrelated packages.
+- Manifest pins and lockfile entries disagree, or peer minimums rise without
+  a compatibility decision and matching README requirements.
+- A Pi SDK or CLI change breaks codemode, preview, consent, or package loading.
+- Audit failures are ignored, or a new dependency advisory blocks CI.
+- An update changes shipped files or includes configuration in the npm archive.
+
+Validate the YAML and matching dependency names locally. Run typechecking,
+existing codemode and package installation E2E tests, both dependency audits,
+and package inspection. GitHub must validate the actual scheduled Dependabot
+run and required-check settings after the configuration reaches the default
+branch. This automation does not update a separately installed Pi host.
+
 ## Dependency audits
 
 Run and report dependency checks separately from correctness checks:
@@ -264,6 +293,6 @@ Report package, severity, affected scope, and remediation status. Tests can pass
 while a dependency has a known advisory. An empty audit also is not proof that
 all vulnerabilities are known or absent.
 
-The known Pi advisory and other disclosure limits are in security.md.
+Disclosure limits and host dependency risks are in security.md.
 Review dependency changes rather than applying audit fixes blindly. Live
 provider checks require separate approval as described there.

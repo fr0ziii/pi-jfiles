@@ -78,8 +78,7 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev
 
-      - name: Report full dependency audit (non-blocking)
-        continue-on-error: true
+      - name: Audit all dependencies
         run: npm audit
 
       - name: Inspect package contents

@@ -54,7 +54,6 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev
 
-      # Pi's known development dependency advisory is reported, not hidden.
-      - name: Report full dependency audit (non-blocking)
-        continue-on-error: true
+      # Report development dependency risk separately from the runtime audit.
+      - name: Audit all dependencies
         run: npm audit
