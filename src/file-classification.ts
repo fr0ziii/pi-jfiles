@@ -1,11 +1,10 @@
 import type { ClassifierApi, ClassifierContext, ClassifierModel, ClassifierOptions, ClassifierResult, Usage } from "@earendil-works/pi-ai";
-import { Check } from "typebox/value";
 import { Clock, Effect, Option, Semaphore } from "effect";
 import {
-  answersSchema, parseScanInput,
+  parseFileAnswers, parseScanInput,
   type ScanInput, type ClassifyInput, type ScanResult, type FileResult, type ScanError,
 } from "./file-classification-contract.ts";
-import { selectFiles, readSelectedFile, type SelectedFiles } from "./file-selection.ts";
+import { selectFiles, type SelectedFiles, type SelectedFile } from "./file-selection.ts";
 
 /** Runtime boundary for Pi authentication and classifier execution; source is never logged here. */
 export interface FileClassifierRuntime {
@@ -29,6 +28,10 @@ export interface FileClassifierPolicy {
   readonly requestDeadlineMs: number;
 }
 
+interface FileExecution {
+  run(file: SelectedFile): Effect.Effect<void>;
+}
+
 const defaultPolicy: FileClassifierPolicy = { scanDeadlineMs: 120_000, requestDeadlineMs: 30_000 };
 
 /** One file classification operation; each instance owns its shared request and scan budgets. */
@@ -41,6 +44,91 @@ export interface FileClassifier {
 export function createFileClassifier(policy: FileClassifierPolicy = defaultPolicy): FileClassifier {
   const requests = Semaphore.makeUnsafe(4);
   const scans = Semaphore.makeUnsafe(2);
+
+  // Capacity belongs to the classifier; each execution closes over one scan's reader and accounting.
+  function createFileExecution(
+    selected: SelectedFiles,
+    classification: {
+      readonly model: ClassifierModel<ClassifierApi>;
+      readonly questions: ClassifyInput["questions"];
+      readonly runtime: FileClassifierRuntime;
+    },
+    accounting: {
+      submitted(bytes: number): void;
+      reported(usage: Usage): void;
+      recorded(outcome: FileResult): void;
+      interrupted(path: string): void;
+    },
+  ): FileExecution {
+    return {
+      run: Effect.fn("FileExecution.run")((file: SelectedFile) => {
+        let submitted = false;
+        let recorded = false;
+
+        const classifyFile = Effect.uninterruptibleMask(restore => Effect.gen(function*() {
+          yield* restore(requests.take(1));
+          let handedToProvider = false;
+
+          return yield* restore(Effect.gen(function*() {
+            const source = yield* selected.read(file);
+
+            const context: ClassifierContext = {
+              state: { path: file.path, content: source.content, sourceKind: "untrusted-project-file" },
+              questions: classification.questions,
+            };
+
+            // Conservative byte estimate, not a claim of exact tokenization.
+            if (Buffer.byteLength(JSON.stringify(context)) + 2048 > classification.model.contextWindow) {
+              return yield* Effect.fail<FileResult>({ status: "skipped", path: file.path, reason: "context-limit" });
+            }
+
+            const response = yield* Effect.callback<ClassifierResult, FileResult>((resume, signal) => {
+              accounting.submitted(source.bytes);
+              submitted = true;
+              handedToProvider = true;
+
+              const pending = Promise.resolve().then(() => classification.runtime.classify(classification.model, context, {
+                signal, timeoutMs: policy.requestDeadlineMs, maxRetries: 0,
+              }));
+
+              // Interruption aborts the signal, but only native settlement releases capacity.
+              void pending.then(
+                response => { Effect.runSync(requests.release(1)); resume(Effect.succeed(response)); },
+                () => {
+                  Effect.runSync(requests.release(1));
+                  resume(Effect.fail({ status: "failed", path: file.path, reason: "provider-error" }));
+                },
+              );
+            }).pipe(Effect.timeoutOrElse({
+              duration: policy.requestDeadlineMs,
+              orElse: () => Effect.fail<FileResult>({ status: "failed", path: file.path, reason: "deadline" }),
+            }));
+
+            if (response.usage && isValidUsage(response.usage)) accounting.reported(response.usage);
+
+            if (response.stopReason !== "stop") return yield* Effect.fail<FileResult>({
+              status: "failed", path: file.path, reason: response.stopReason === "aborted" ? "cancelled" : "provider-error",
+            });
+            const answers = parseFileAnswers(classification.questions, response.answers);
+
+            if (!answers) return yield* Effect.fail<FileResult>({ status: "failed", path: file.path, reason: "invalid-answer" });
+
+            return { status: "classified", path: file.path, bytes: source.bytes, digest: source.digest, answers } as const;
+          })).pipe(Effect.ensuring(Effect.suspend(() => handedToProvider ? Effect.void : requests.release(1))));
+        }));
+
+        return classifyFile.pipe(
+          Effect.match({
+            onFailure: outcome => { accounting.recorded(outcome); recorded = true; },
+            onSuccess: outcome => { accounting.recorded(outcome); recorded = true; },
+          }),
+          Effect.onInterrupt(() => Effect.sync(() => {
+            if (submitted && !recorded) accounting.interrupted(file.path);
+          })),
+        );
+      }),
+    };
+  }
 
   return {
     run: Effect.fn("FileClassifier.run")(function*(cwd: string, value: ScanInput, runtime: FileClassifierRuntime, callerSignal?: AbortSignal) {
@@ -116,83 +204,19 @@ export function createFileClassifier(policy: FileClassifierPolicy = defaultPolic
           result.files.push(...selected.outcomes);
 
           if (input.mode === "preview") {
-            for (const file of selected.candidates) result.files.push({ status: "preview", path: file.path, bytes: file.stat.size });
+            for (const file of selected.candidates) result.files.push({ status: "preview", path: file.path, bytes: file.bytes });
             result.status = "preview";
           } else if (model) {
-            const selectedModel = model;
-            yield* Effect.forEach(selected.candidates, file => {
-              let submitted = false;
-              let recorded = false;
+            const execution = createFileExecution(selected, { model, questions: input.questions, runtime }, {
+              submitted: bytes => { result.summary.requests++; result.summary.bytesSubmitted += bytes; },
+              reported: usage => { aggregateUsage = addUsage(aggregateUsage, usage); result.summary.usageReports++; },
+              recorded: outcome => { result.files.push(outcome); },
+              interrupted: path => { result.files.push({
+                status: "failed", path, reason: scanError?.tag === "Deadline" ? "deadline" : "cancelled",
+              }); },
+            });
 
-              const classifyFile = Effect.uninterruptibleMask(restore => Effect.gen(function*() {
-                yield* restore(requests.take(1));
-                let handedToProvider = false;
-
-                return yield* restore(Effect.gen(function*() {
-                  const source = yield* readSelectedFile(selected.root, file);
-
-                  const context: ClassifierContext = {
-                    state: { path: file.path, content: source.content, sourceKind: "untrusted-project-file" },
-                    questions: input.questions,
-                  };
-
-                  // Conservative byte estimate, not a claim of exact tokenization.
-                  if (Buffer.byteLength(JSON.stringify(context)) + 2048 > selectedModel.contextWindow) {
-                    return yield* Effect.fail<FileResult>({ status: "skipped", path: file.path, reason: "context-limit" });
-                  }
-
-                  const response = yield* Effect.callback<ClassifierResult, FileResult>((resume, signal) => {
-                    result.summary.requests++;
-                    result.summary.bytesSubmitted += source.bytes;
-                    submitted = true;
-                    handedToProvider = true;
-
-                    const pending = Promise.resolve().then(() => runtime.classify(selectedModel, context, {
-                      signal, timeoutMs: policy.requestDeadlineMs, maxRetries: 0,
-                    }));
-
-                      // Ownership crosses the callback boundary: interruption aborts the signal,
-                      // but only native Promise settlement releases the shared request permit.
-                      void pending.then(
-                        response => { Effect.runSync(requests.release(1)); resume(Effect.succeed(response)); },
-                        () => {
-                          Effect.runSync(requests.release(1));
-                          resume(Effect.fail({ status: "failed", path: file.path, reason: "provider-error" }));
-                        },
-                      );
-                    }).pipe(Effect.timeoutOrElse({
-                      duration: policy.requestDeadlineMs,
-                      orElse: () => Effect.fail<FileResult>({ status: "failed", path: file.path, reason: "deadline" }),
-                    }));
-
-                    if (response.usage && isValidUsage(response.usage)) {
-                      aggregateUsage = addUsage(aggregateUsage, response.usage);
-                      result.summary.usageReports++;
-                    }
-
-                    if (response.stopReason !== "stop") return yield* Effect.fail<FileResult>({
-                      status: "failed", path: file.path, reason: response.stopReason === "aborted" ? "cancelled" : "provider-error",
-                    });
-                    const answers = validateFileAnswers(response, input);
-
-                    if (!answers) return yield* Effect.fail<FileResult>({ status: "failed", path: file.path, reason: "invalid-answer" });
-
-                    return { status: "classified", path: file.path, bytes: source.bytes, digest: source.digest, answers } as const;
-                  })).pipe(Effect.ensuring(Effect.suspend(() => handedToProvider ? Effect.void : requests.release(1))));
-              }));
-
-              return classifyFile.pipe(
-                Effect.match({
-                  onFailure: outcome => { result.files.push(outcome); recorded = true; },
-                  onSuccess: outcome => { result.files.push(outcome); recorded = true; },
-                }),
-                Effect.onInterrupt(() => Effect.sync(() => {
-                  if (submitted && !recorded) result.files.push({
-                    status: "failed", path: file.path, reason: scanError?.tag === "Deadline" ? "deadline" : "cancelled",
-                  });
-                })),
-              );
-            }, { concurrency: 4, discard: true });
+            yield* Effect.forEach(selected.candidates, execution.run, { concurrency: 4, discard: true });
           }
         });
 
@@ -258,30 +282,6 @@ function finalizeScan(result: ScanResult, elapsedMs: number): void {
   result.summary.usageAvailability = result.summary.usageReports === 0 ? "none"
     : result.summary.usageReports === result.summary.requests ? "complete" : "partial";
   result.summary.elapsedMs = elapsedMs;
-}
-
-function validateFileAnswers(response: ClassifierResult, input: ClassifyInput):
-  Extract<FileResult, { status: "classified" }>["answers"] | undefined {
-  if (!Check(answersSchema, response.answers)) return undefined;
-
-  if (Object.keys(response.answers).length !== Object.keys(input.questions).length) return undefined;
-
-  for (const [key, question] of Object.entries(input.questions)) {
-    const answer = response.answers[key];
-
-    if (!answer || answer.type !== question.type) return undefined;
-
-    if (question.type === "choice" && answer.type === "choice") {
-      const labels = Object.keys(question.criteria).sort();
-
-      if (!labels.includes(answer.choice) || Object.keys(answer.probabilities).sort().join("\0") !== labels.join("\0") ||
-          Math.abs(Object.values(answer.probabilities).reduce((sum, value) => sum + value, 0) - 1) > 0.01) return undefined;
-    }
-
-    if (question.type === "score" && answer.type === "score" && answer.score > question.criteria.length - 1) return undefined;
-  }
-
-  return response.answers;
 }
 
 function isValidUsage(usage: Usage): boolean {

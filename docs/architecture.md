@@ -18,9 +18,9 @@ fallbacks, or separate preview tools.
 | Module | Owns |
 | --- | --- |
 | src/index.ts | Pi registration, startup consent flag, model and credential resolution, tool result translation |
-| src/file-classification-contract.ts | TypeBox schemas, schema-derived types, input parsing |
+| src/file-classification-contract.ts | TypeBox schemas, schema-derived types, input and answer parsing |
 | src/file-selection.ts | Ripgrep discovery, exclusions, metadata selection, bounded source reads |
-| src/file-classification.ts | Scan admission, shared request capacity, deadlines, cancellation, answers, coverage, usage |
+| src/file-classification.ts | Scan admission, shared capacity, per-file execution, deadlines, cancellation, coverage, usage |
 
 The Pi Adapter constructs one classifier for the extension. Pi supplies the
 operation-specific FileClassifierRuntime through an explicit seam. Production
@@ -55,8 +55,11 @@ ClassifyInput, ScanResult, FileResult, and ScanError derive from the owning
 schemas; there is no second Effect schema or handwritten codemode declaration.
 ScanInput accepts preview or classification, while ClassifyInput accepts only
 classification. FileSelection describes caller scope; SelectedFiles contains
-selected file snapshots and selection outcomes. Naming rules and the symbol
-migration map are in development.md.
+relative file metadata, selection outcomes, and read(file). The selection owns
+snapshot identity, the real root, absolute paths, and Node Stats. Callers pass an
+original candidate to its owning selection reader; copied or foreign objects
+fail with file-changed. Metadata is immutable. Preview does not call the reader.
+Naming rules and source Interface changes are in development.md.
 
 Preview requires explicit mode: "preview" and accepts selection only.
 Classification requires questions; omitted mode remains classification.
@@ -71,8 +74,16 @@ restrictions and generated declarations tested together.
 
 ## Resource ownership
 
-Each classifier owns scan admission and shared provider capacity. Limits are
-listed in README.md and enforced inside the runtime, not supplied by callers.
+Each classifier owns scan admission and shared provider capacity. A private
+FileExecution Module exposes run(file) and captures its selection reader,
+classification context, and accounting callbacks. It owns permit acquisition,
+content reads, context limits, submission, request deadlines, response parsing,
+and submitted-file interruption coverage. The scan owns admission, the overall
+deadline, queued coverage, and aggregate accounting. Native settlement only
+releases capacity and resumes the Effect; it never calls accounting callbacks.
+
+Limits are listed in README.md and enforced inside the runtime, not supplied by
+callers.
 Preview occupies scan capacity but no provider request capacity. Requests have
 zero automatic retries.
 
@@ -106,6 +117,12 @@ The selected count equals files.length and the sum of classified, previewed,
 skipped, failed, and unprocessed counts. A classification with any non-classified
 file is partial. Scan-level failures are failed and set the Pi result's isError.
 Missing or invalid answers never become fabricated negative answers.
+
+The pure contract-owned parseFileAnswers takes questions and candidate answers,
+not Pi response objects. The provider declares an answer representation, but it
+does not prove runtime integrity or criterion relationships. Parsing retains the
+schema and semantic checks and returns undefined for invalid evidence; per-file
+execution translates that result to invalid-answer.
 
 Answer validation checks exact question coverage and matching variants.
 Probabilities and confidence are finite and bounded. Choice labels and keys

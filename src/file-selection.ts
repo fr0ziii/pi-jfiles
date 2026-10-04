@@ -26,20 +26,26 @@ const deniedNames = new Set([
   ".pypirc", ".ds_store", "herdr-agent-state.ts",
 ]);
 
-/** A preflight file identity; reads must match it before source is submitted. */
+/** Relative metadata for a selected file; only its owning selection can read the original object. */
 export interface SelectedFile {
+  readonly path: string;
+  readonly bytes: number;
+}
+
+interface FileSnapshot {
   readonly path: string;
   readonly absolutePath: string;
   readonly stat: Stats;
 }
 
-/** Bounded file selection; skipped files remain visible in the coverage report. */
+/** Bounded file selection; skipped files remain visible and snapshot details stay private. */
 export interface SelectedFiles {
-  readonly root: string;
   readonly discovered: number;
   readonly selected: number;
   readonly candidates: readonly SelectedFile[];
   readonly outcomes: readonly FileResult[];
+  /** Read a selected snapshot; foreign or reconstructed objects fail with file-changed. */
+  read(file: SelectedFile): ReturnType<typeof readSelectedFile>;
 }
 
 /** Read-only project selection with ignore rules, safe exclusions, and preflight budgets. */
@@ -67,6 +73,7 @@ export const selectFiles = Effect.fn("selectFiles")(function*(
 
   if (paths.length > 200) return yield* Effect.fail<ScanError>({ tag: "ScanLimit", message: "Jev files selection exceeds 200 files. Narrow the selection." });
   const candidates: SelectedFile[] = [];
+  const snapshots = new WeakMap<SelectedFile, FileSnapshot>();
   const outcomes: FileResult[] = [];
   let bytes = 0;
 
@@ -106,14 +113,24 @@ export const selectFiles = Effect.fn("selectFiles")(function*(
     bytes += preflight.stat.size;
 
     if (bytes > MAX_SCAN_BYTES) return yield* Effect.fail<ScanError>({ tag: "ScanLimit", message: "Jev files selection exceeds 5 MiB. Narrow the selection." });
-    candidates.push(preflight);
+    const file = Object.freeze({ path, bytes: preflight.stat.size });
+    snapshots.set(file, preflight);
+    candidates.push(file);
   }
 
-  return { root, discovered: discovered.length, selected: paths.length, candidates, outcomes };
+  return {
+    discovered: discovered.length, selected: paths.length, candidates, outcomes,
+    read: file => Effect.suspend(() => {
+      const snapshot = snapshots.get(file);
+
+      return snapshot ? readSelectedFile(root, snapshot)
+        : Effect.fail({ status: "failed", path: file.path, reason: "file-changed" } as const);
+    }),
+  };
 });
 
 /** Read exactly one bounded UTF-8 file snapshot; cleanup waits for native I/O to settle. */
-export const readSelectedFile = Effect.fn("readSelectedFile")(function*(root: string, file: SelectedFile): Effect.fn.Return<
+const readSelectedFile = Effect.fn("readSelectedFile")(function*(root: string, file: FileSnapshot): Effect.fn.Return<
   { readonly content: string; readonly digest: string; readonly bytes: number },
   Exclude<FileResult, { status: "classified" | "preview" }>
 > {

@@ -59,7 +59,9 @@ There is no caller-controlled exclusion bypass.
 
 Classification checks these conditions before accepting source:
 
-- The selected snapshot belongs to the current real project root.
+- The original selected object belongs to its selection reader. The reader keeps
+  the real root, absolute path, and Node Stats private. Copied or foreign objects
+  fail before content I/O. This encapsulation is not an OS sandbox.
 - Every path component is checked for symlinks before and after the read.
 - The file is opened with O_RDONLY, O_NOFOLLOW, and O_NONBLOCK and is regular.
 - Device, inode, size, modification time, and change time agree with the selected

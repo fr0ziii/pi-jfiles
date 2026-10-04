@@ -145,6 +145,9 @@ test("honestly reports provider errors, throws, and invalid answers without erro
     response => ({ ...response, answers: {} }),
     response => ({ ...response, answers: { relevant: { type: "bool", probability: 1.5 } } }),
     response => ({ ...response, answers: { relevant: { type: "bool", probability: Number.NaN } } }),
+    response => ({ ...response, answers: { replacement: { type: "bool", probability: 0.5 } } }),
+    response => ({ ...response, answers: { relevant: { type: "bool", probability: -0.1 } } }),
+    response => ({ ...response, answers: { relevant: { ...response.answers.relevant, unexpected: true } } }),
     response => ({ ...response, answers: { relevant: { type: "score", score: 1, confidence: 0.5 } } }),
     response => ({ ...response, answers: { ...response.answers, extra: { type: "bool", probability: 0.8 } } }),
     () => { throw new Error("SECRET_SOURCE thrown provider request"); },
@@ -186,6 +189,9 @@ test("rejects unknown choice labels, incomplete probabilities, and scores outsid
     { layer: { type: "choice", choice: "domain", probabilities: { domain: 1 }, confidence: 1 } },
     { layer: { type: "choice", choice: "domain", probabilities: { domain: 1, adapter: 1 }, confidence: 1 } },
     { risk: { type: "score", score: 2, confidence: 1 } },
+    { risk: { type: "score", score: Number.POSITIVE_INFINITY, confidence: 1 } },
+    { layer: { type: "choice", choice: "domain", probabilities: { domain: 1, wrong: 0 }, confidence: 1 } },
+    { layer: { type: "choice", choice: "domain", probabilities: { domain: 1, adapter: 0 }, confidence: Number.NaN } },
   ] satisfies Partial<ClassifierResult["answers"]>[]) {
     const scan = await Effect.runPromise(createFileClassifier().run(root, input, testRuntime({
       classify: async (_model, context) => {
@@ -300,13 +306,16 @@ test("held permits become available only when cancelled provider promises settle
   const paths = Array.from({ length: 5 }, (_, index) => "f" + index + ".ts");
   const root = await createTestProject(t, Object.fromEntries(paths.map(path => [path, "example"])));
   const controller = new AbortController();
-  const pending: { context: Parameters<typeof testClassifierResponse>[0]; resolve: (value: ClassifierResult) => void }[] = [];
+  const pending: { context: Parameters<typeof testClassifierResponse>[0]; completion: ReturnType<typeof Promise.withResolvers<ClassifierResult>> }[] = [];
 
-  const runtime = testRuntime({ classify: async (_model, context) => new Promise<ClassifierResult>(resolve => {
-    pending.push({ context, resolve });
+  const runtime = testRuntime({ classify: (_model, context) => {
+    const completion = Promise.withResolvers<ClassifierResult>();
+    pending.push({ context, completion });
 
     if (pending.length === 4) controller.abort();
-  }) });
+
+    return completion.promise;
+  } });
 
   const runner = createFileClassifier();
   const cancelled = await Effect.runPromise(runner.run(root, testScanInput(paths), runtime, controller.signal));
@@ -314,10 +323,23 @@ test("held permits become available only when cancelled provider promises settle
   assert.equal(cancelled.result.summary.requests, 4);
   assert.ok(hasValidCoverage(cancelled.result));
 
-  for (const request of pending) request.resolve(testClassifierResponse(request.context));
+  assert.equal(cancelled.result.summary.failed, 4);
+  assert.equal(cancelled.result.summary.unprocessed, 1);
+  const snapshot = JSON.stringify(cancelled);
+
+  for (const [index, request] of pending.entries()) {
+    if (index % 2 === 0) request.completion.reject(new Error("SYNTHETIC_LATE_PROVIDER_FAILURE"));
+    else request.completion.resolve({ ...testClassifierResponse(request.context),
+      usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11,
+        cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, total: 2 } } });
+  }
+
   const followup = await Effect.runPromise(runner.run(root, testScanInput(paths), testRuntime()));
   assert.equal(followup.result.summary.classified, paths.length);
   assert.ok(hasValidCoverage(followup.result));
+  assert.equal(JSON.stringify(cancelled), snapshot);
+  assert.equal(cancelled.result.summary.usageReports, 0);
+  assert.equal("usage" in cancelled, false);
 });
 
 test("shares a four-request concurrency budget across concurrent scans", async t => {

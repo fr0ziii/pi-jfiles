@@ -57,7 +57,7 @@ change, not a change to the version 1 tool contract. There are no legacy aliases
 | SelectedSourceFile | SelectedFile |
 | SourceSelection | SelectedFiles |
 | selectSourceFiles | selectFiles |
-| readSelectedSource | readSelectedFile |
+| readSelectedSource | readSelectedFile (now private; use SelectedFiles.read) |
 | isExcludedSourcePath (private) | isExcludedFilePath (private) |
 | testRequest (test fixture) | testScanInput (test fixture) |
 
@@ -133,6 +133,60 @@ Tests use temporary projects and agent directories. They must leave user
 settings unchanged and keep synthetic source and credentials out of results.
 On macOS, the filesystem can reject the invalid-UTF-8 filename fixture before
 discovery. Report that skip instead of claiming its decoder branch was tested.
+
+## Classification ownership refactor
+
+Use the existing classifier, selection reader, Pi codemode E2E, and package
+installation E2E interfaces. Before each extraction, check these failure modes:
+
+- Answer parsing loses schema-derived types, exact coverage, choice probability
+  rules, score bounds, or finite fractional scores.
+- Snapshot metadata exposes absolute paths or Node Stats. A reader accepts a
+  foreign or reconstructed snapshot, loses mutation checks, or reads in preview.
+- A file read starts before capacity is acquired, or a pre-submission failure
+  retains a permit.
+- Timeout or interruption releases a submitted permit before its native Promise
+  settles. Late success or rejection changes returned results or reported usage.
+- Submitted interrupted files or queued files lose coverage, or billed errors
+  lose usage. Direct Effect interruption becomes an ordinary scan result.
+- Schema fingerprints, diagnostics, consent ordering, limits, or package contents
+  change accidentally.
+
+Keep the TypeBox owner and explicit Pi runtime seam. Read Effect LLMS.md and
+verify changed APIs against the pinned package. Use controlled provider Promises,
+readiness signals, and TestClock for lifecycle checks. Existing examples cover
+answer equivalence; snapshot identity and late settlement need focused checks.
+
+### Source Interface changes
+
+The version 1 tool contract, protocol fields, and schema fingerprints are
+unchanged. Direct TypeScript consumers must use these source Interfaces:
+
+- parseFileAnswers(questions, answers) is exported by the contract Module.
+  Both inputs retain schema-derived types. Questions must come from a validated
+  ClassifyInput. The result is the original answer map or undefined for invalid
+  evidence. There are no library parsing options.
+- SelectedFile exposes only path and bytes. Absolute paths and Node Stats are
+  private. SelectedFiles no longer exposes root.
+- Replace readSelectedFile(root, file) with selected.read(file). The old function
+  is private, with no compatibility alias. Keep original candidate objects;
+  copied, reconstructed, and foreign snapshots fail with file-changed.
+- FileExecution is private. Its run(file) Interface captures dependencies and
+  lifecycle state. It adds no tool, user configuration, dependency, or provider
+  abstraction. Scan accounting callbacks receive only bytes, usage, paths, and
+  source-free outcomes.
+
+The deletion test supports these owners. Removing answer parsing would move
+schema and criterion knowledge back into execution. Removing the selection
+reader would expose filesystem identity and root checks to consumers. Removing
+FileExecution would put permit transfer, native settlement, request deadlines,
+and submitted-file coverage back into scan orchestration. No new runtime file,
+Context tag, Layer graph, or generic executor is needed.
+
+This is ownership work, not reduced validation or filesystem work. Existing
+examples and schema checks cover answer equivalence. Deterministic snapshot and
+late-settlement cases cover the changed ownership; no new property-testing
+dependency is needed for unchanged invariants.
 
 ## Lint tooling
 

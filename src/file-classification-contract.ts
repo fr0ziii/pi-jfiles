@@ -174,3 +174,28 @@ export function parseScanInput(
 
   return { status: "ok", input: value };
 }
+
+/** Parse file answers for validated questions; undefined means invalid coverage, schema, or criteria. */
+export function parseFileAnswers(questions: ClassifyInput["questions"], answers: Static<typeof answersSchema>):
+  Extract<FileResult, { status: "classified" }>["answers"] | undefined {
+  if (!Check(answersSchema, answers)) return undefined;
+
+  if (Object.keys(answers).length !== Object.keys(questions).length) return undefined;
+
+  for (const [key, question] of Object.entries(questions)) {
+    const answer = answers[key];
+
+    if (!answer || answer.type !== question.type) return undefined;
+
+    if (question.type === "choice" && answer.type === "choice") {
+      const labels = Object.keys(question.criteria).sort();
+
+      if (!labels.includes(answer.choice) || Object.keys(answer.probabilities).sort().join("\0") !== labels.join("\0") ||
+          Math.abs(Object.values(answer.probabilities).reduce((sum, value) => sum + value, 0) - 1) > 0.01) return undefined;
+    }
+
+    if (question.type === "score" && answer.type === "score" && answer.score > question.criteria.length - 1) return undefined;
+  }
+
+  return answers;
+}

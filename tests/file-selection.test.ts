@@ -7,7 +7,7 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { readSelectedFile, selectFiles } from "../src/file-selection.ts";
+import { selectFiles } from "../src/file-selection.ts";
 import { createFileClassifier } from "../src/file-classification.ts";
 import { createTestProject, hasValidCoverage, testScanInput, testRuntime } from "./test-fixtures.ts";
 
@@ -204,12 +204,33 @@ test("symlink files and parents never submit external source", async t => {
 test("a snapshot from a different project cannot cross the read root", async t => {
   const root = await createTestProject(t, { "src/example.ts": "local" });
   const external = await createTestProject(t, { "src/example.ts": "external" });
-  const selection = await Effect.runPromise(selectFiles(external, testScanInput().selection));
-  const file = selection.candidates[0];
+  const selection = await Effect.runPromise(selectFiles(root, testScanInput().selection));
+  const foreign = await Effect.runPromise(selectFiles(external, testScanInput().selection));
+  const file = foreign.candidates[0];
   assert.ok(file);
-  const source = await Effect.runPromise(Effect.result(readSelectedFile(root, file)));
+  const source = await Effect.runPromise(Effect.result(selection.read(file)));
   assert.ok(Result.isFailure(source));
   assert.equal(source.failure.reason, "file-changed");
+});
+
+test("selection exposes relative metadata and reads only its original snapshots", async t => {
+  const root = await createTestProject(t, { "src/example.ts": "local" });
+  const selection = await Effect.runPromise(selectFiles(root, testScanInput().selection));
+  const file = selection.candidates[0];
+  assert.ok(file);
+  assert.deepEqual(file, { path: "src/example.ts", bytes: 5 });
+  assert.equal("root" in selection, false);
+
+  for (const copy of [{ ...file }, { ...file, path: "../outside.ts" }]) {
+    const rejected = await Effect.runPromise(Effect.result(selection.read(copy)));
+    assert.ok(Result.isFailure(rejected));
+    assert.equal(rejected.failure.reason, "file-changed");
+  }
+
+  const source = await Effect.runPromise(selection.read(file));
+  assert.equal(source.content, "local");
+  assert.equal(source.bytes, 5);
+  assert.match(source.digest, /^[a-f0-9]{64}$/u);
 });
 
 test("skips oversized, binary, and invalid UTF-8 files without truncation", async t => {
@@ -232,12 +253,12 @@ test("detects mutation and symlink replacement after preflight", async t => {
   const file = selection.candidates[0];
   assert.ok(file);
   await writeFile(join(root, file.path), "changed");
-  const changed = await Effect.runPromise(Effect.result(readSelectedFile(selection.root, file)));
+  const changed = await Effect.runPromise(Effect.result(selection.read(file)));
   assert.ok(Result.isFailure(changed));
   assert.equal(changed.failure.reason, "file-changed");
   await rename(join(root, file.path), join(root, "original.ts"));
   await symlink(join(root, "original.ts"), join(root, file.path));
-  const replacement = await Effect.runPromise(Effect.result(readSelectedFile(selection.root, file)));
+  const replacement = await Effect.runPromise(Effect.result(selection.read(file)));
   assert.ok(Result.isFailure(replacement));
   assert.ok(["file-changed", "unreadable"].includes(replacement.failure.reason));
 });
