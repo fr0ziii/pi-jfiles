@@ -48,8 +48,8 @@
     "typebox": "^1.3.27"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "1.0.1",
-    "@earendil-works/pi-coding-agent": "1.0.1",
+    "@earendil-works/pi-ai": "1.0.2",
+    "@earendil-works/pi-coding-agent": "1.0.2",
     "@oxlint/plugins": "1.86.0",
     "@types/node": "^24.5.2",
     "oxlint": "1.86.0",
